@@ -161,7 +161,7 @@ function FT:CreateProfilesWindow()
     frame:SetScript("OnShow", updateSize)
 
     local mergeCheck = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
-    mergeCheck:SetPoint("BOTTOMLEFT", 16, 18)
+    mergeCheck:SetPoint("BOTTOMLEFT", 16, 44)
     local mergeLabel = mergeCheck:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     mergeLabel:SetPoint("LEFT", mergeCheck, "RIGHT", 4, 0)
     mergeLabel:SetText("Merge (do not overwrite)")
