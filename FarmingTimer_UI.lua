@@ -277,13 +277,17 @@ function FT:UpdateRow(row)
 
     local current = tonumber(row.data.current) or 0
     local target = tonumber(row.data.target) or 0
-    if target > 0 then
+    local considerTargets = FT.db and FT.db.considerTargets ~= false
+    if considerTargets and target > 0 then
         row.currentText:SetText(string.format("%d / %d", current, target))
         if current >= target then
             row.currentText:SetTextColor(0.2, 1.0, 0.2)
         else
             row.currentText:SetTextColor(1, 1, 1)
         end
+    elseif itemID then
+        row.currentText:SetText(string.format("%d", current))
+        row.currentText:SetTextColor(1, 1, 1)
     else
         row.currentText:SetText("-")
         row.currentText:SetTextColor(0.7, 0.7, 0.7)
@@ -317,11 +321,20 @@ function FT:UpdateSummary(completed, valid)
     if not self.frame or not self.frame.statusText then
         return
     end
+    local considerTargets = self.db and self.db.considerTargets ~= false
     if valid == 0 then
-        self.frame.statusText:SetText("No items configured")
+        if considerTargets then
+            self.frame.statusText:SetText("No target amounts set")
+        else
+            self.frame.statusText:SetText("No items configured")
+        end
         return
     end
-    self.frame.statusText:SetText(string.format("%d / %d items completed", completed, valid))
+    if considerTargets then
+        self.frame.statusText:SetText(string.format("%d / %d items completed", completed, valid))
+    else
+        self.frame.statusText:SetText(string.format("Tracking %d items", valid))
+    end
 end
 
 function FT:UpdateControls()
@@ -363,6 +376,16 @@ function FT:UpdateControls()
     if self.frame.presetDeleteButton then
         self.frame.presetDeleteButton:SetEnabled(not isRunning)
     end
+    if self.frame.targetCheck then
+        self.frame.targetCheck:SetEnabled(not isRunning)
+        if self.frame.targetCheckLabel then
+            if isRunning then
+                self.frame.targetCheckLabel:SetTextColor(0.6, 0.6, 0.6)
+            else
+                self.frame.targetCheckLabel:SetTextColor(1, 1, 1)
+            end
+        end
+    end
 
     for _, row in ipairs(self.rows) do
         row.itemButton:SetEnabled(not isRunning)
@@ -377,8 +400,7 @@ function FT:RefreshList()
         return
     end
     self.db.items = self.db.items or {}
-    self:UpdateRows()
-    self:UpdateSummary(0, self:GetValidCount())
+    self:RefreshProgress()
 end
 
 function FT:InitUI()
@@ -440,9 +462,24 @@ function FT:InitUI()
     frame.statusText:SetPoint("TOP", frame.timerText, "BOTTOM", 0, -6)
     frame.statusText:SetText("No items configured")
 
+    local targetCheck = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
+    targetCheck:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -72)
+    targetCheck:SetChecked(self.db.considerTargets ~= false)
+    local targetLabel = targetCheck:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    targetLabel:SetPoint("LEFT", targetCheck, "RIGHT", 4, 0)
+    targetLabel:SetText("Use target amounts")
+    targetCheck:SetScript("OnClick", function(self)
+        if not FT.db then
+            return
+        end
+        FT.db.considerTargets = self:GetChecked()
+        FT:RefreshProgress()
+        FT:UpdateControls()
+    end)
+
     local presetRow = CreateFrame("Frame", nil, frame)
-    presetRow:SetPoint("TOPLEFT", 18, -72)
-    presetRow:SetPoint("TOPRIGHT", -18, -72)
+    presetRow:SetPoint("TOPLEFT", 18, -96)
+    presetRow:SetPoint("TOPRIGHT", -18, -96)
     presetRow:SetHeight(26)
 
     local presetLabel = presetRow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -490,10 +527,12 @@ function FT:InitUI()
     frame.presetSaveButton = saveButton
     frame.presetLoadButton = loadButton
     frame.presetDeleteButton = deleteButton
+    frame.targetCheck = targetCheck
+    frame.targetCheckLabel = targetLabel
 
     local header = CreateFrame("Frame", nil, frame)
-    header:SetPoint("TOPLEFT", 18, -108)
-    header:SetPoint("TOPRIGHT", -34, -108)
+    header:SetPoint("TOPLEFT", 18, -132)
+    header:SetPoint("TOPRIGHT", -34, -132)
     header:SetHeight(16)
 
     local headerItem = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -506,14 +545,14 @@ function FT:InitUI()
 
     local headerTarget = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     headerTarget:SetPoint("LEFT", header, "LEFT", 2 + ITEM_BUTTON_SIZE + 8 + ITEM_ID_WIDTH + 8, 0)
-    headerTarget:SetText("Anzahl")
+    headerTarget:SetText("Target")
 
     local headerCurrent = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     headerCurrent:SetPoint("LEFT", header, "LEFT", 2 + ITEM_BUTTON_SIZE + 8 + ITEM_ID_WIDTH + 8 + TARGET_WIDTH + 12, 0)
     headerCurrent:SetText("Progress")
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 18, -126)
+    scrollFrame:SetPoint("TOPLEFT", 18, -150)
     scrollFrame:SetPoint("BOTTOMRIGHT", -34, 54)
 
     local content = CreateFrame("Frame", nil, scrollFrame)

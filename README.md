@@ -1,70 +1,63 @@
 # FarmingTimer
 
-Ein einfaches WoW-Addon, das deine Farmzeit misst und automatisch stoppt, sobald alle gewuenschten Items in der Zielmenge gesammelt wurden.
+A simple WoW addon that tracks your farming time and stops automatically when all target amounts are reached.
 
-## Funktionen
-
-- Mehrere Items gleichzeitig tracken.
-- Item per Drag and Drop aus der Tasche oder per ItemID/Item-Link setzen.
-- Ziele (Anzahl) pro Item definieren.
+## Features
+- Track multiple items at once.
+- Set items via drag and drop from your bags or by ItemID/Item Link.
+- Define target amounts per item.
 - Start / Pause / Resume / Stop / Reset.
-- Automatischer Stopp plus Erfolgssound, wenn alle Ziele erreicht sind.
-- Bewegliches Fenster plus Options-Panel im Interface-Menue.
-- Minimap-Button (ein/aus).
-- Presets speichern, laden und loeschen.
+- Auto-stop with a success sound when all targets are met.
+- Movable main window plus Options panel.
+- Minimap button (toggleable).
+- Save, load, and delete presets.
+- Optional: use target amounts (auto-stop) or just track time and counts.
 
 ## Installation
+1. Copy the `FarmingTimer` folder to `World of Warcraft/_retail_/Interface/AddOns/`.
+2. Enable the addon at the character selection screen.
 
-1. Ordner `FarmingTimer` nach `World of Warcraft/_retail_/Interface/AddOns/` kopieren.
-2. Im Charakter-Auswahlbildschirm das Addon aktivieren.
+## Quick Start
+1. Open with `/ft` or the minimap button.
+2. Click **Add Item**.
+3. Drag an item into the slot or paste an ItemID/Link into **ItemID / Link**.
+4. Enter the target amount in **Target**.
+5. Press **Start** and begin farming.
 
-## Schnellstart
+## Main Window Controls
+- **Add Item**: adds a new row.
+- **Start**: starts the timer and tracking.
+- **Pause**: pauses time tracking (progress stays visible).
+- **Resume**: appears instead of Start when paused.
+- **Stop**: ends the run.
+- **Reset**: resets timer and progress.
+- **Preset**: dropdown to select saved presets.
+- **Preset Name**: enter a name and click **Save**.
+- **Load**: loads the selected preset.
+- **Delete**: deletes the selected preset.
+- **Use target amounts**: if enabled, timer auto-stops when all targets are met. If disabled, the timer runs and only counts items.
 
-1. Oeffnen mit `/ft` oder ueber den Minimap-Button.
-2. Klicke **Add Item**.
-3. Item in den Slot ziehen oder ItemID/Link im Feld **ItemID / Link** einfuegen.
-4. Zielmenge im Feld **Anzahl** eintragen.
-5. **Start** druecken und losfarmen.
+## Progress / Counting
+- Counts are **net since start**:
+  `current bag count - start count`
+- If you consume/turn in items during the run, progress can go down.
+- Only items in your bags are counted (no bank).
 
-## Bedienung im Hauptfenster
+## Options (Interface -> AddOns -> FarmingTimer)
+- **Open FarmingTimer**: opens the main window.
+- **Show minimap button**: toggle minimap button.
+- **Reset frame position**: resets the window position.
 
-- **Add Item**: fuegt eine neue Zeile hinzu.
-- **Start**: startet den Timer und die Messung.
-- **Pause**: pausiert die Zeitmessung (Fortschritt bleibt sichtbar).
-- **Resume**: erscheint statt Start, wenn pausiert.
-- **Stop**: beendet den Run.
-- **Reset**: setzt den Timer und Fortschritt zurueck.
-- **Preset**: Dropdown zum Auswaehlen gespeicherter Presets.
-- **Preset-Name**: Name eingeben und mit **Save** speichern.
-- **Load**: laedt das ausgewaehlte Preset.
-- **Delete**: loescht das ausgewaehlte Preset.
-
-## Fortschritt / Zaehleweise
-
-- Es wird netto seit Start gezaehlt:
-  `aktueller Bag-Count - Start-Count`
-- Wenn du waehrend des Runs Items verbrauchst/abgibst, kann der Fortschritt sinken.
-- Gezaehlt werden nur Items im Bag (kein Bank-Count).
-
-## Optionen (Interface -> AddOns -> FarmingTimer)
-
-- **Open FarmingTimer**: oeffnet das Hauptfenster.
-- **Show minimap button**: Minimap-Button ein/aus.
-- **Reset frame position**: setzt die Fenster-Position zurueck.
-
-## Slash-Commands
-
+## Slash Commands
 - `/ft`
 - `/farmingtimer`
 
-## Haeufige Fragen
+## FAQ
+**Why does my item show a question mark?**
+The item may not be cached yet. Wait a moment or open its tooltip so WoW can load the item data.
 
-**Warum wird mein Item als Fragezeichen angezeigt?**
-Das Item ist evtl. noch nicht im Cache. Warte kurz oder oeffne die Tooltip-Info, dann laedt WoW das Item nach.
-
-**Warum steht der Fortschritt auf 0 nach Stop?**
-Nach Stop wird der Run beendet. Mit Start beginnt ein neuer Run mit neuer Baseline.
+**Why is progress 0 after Stop?**
+Stop ends the run. Starting again creates a new baseline.
 
 ## Feedback
-
-Wuensche oder Fehler gern melden, ich baue es ein.
+Suggestions or bugs are welcome.

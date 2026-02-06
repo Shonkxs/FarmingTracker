@@ -11,6 +11,7 @@ local DEFAULTS = {
     visible = true,
     minimap = { hide = false, minimapPos = 220 },
     lastPreset = nil,
+    considerTargets = true,
 }
 
 local function copyDefaults(dst, src)
@@ -239,10 +240,28 @@ function FT:IsValidItem(item)
     return itemID and itemID > 0 and target and target > 0
 end
 
+function FT:IsTrackableItem(item)
+    if not item then
+        return false
+    end
+    local itemID = tonumber(item.itemID)
+    return itemID and itemID > 0
+end
+
 function FT:GetValidCount()
     local count = 0
     for _, item in ipairs(self.db.items) do
         if self:IsValidItem(item) then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+function FT:GetTrackableCount()
+    local count = 0
+    for _, item in ipairs(self.db.items) do
+        if self:IsTrackableItem(item) then
             count = count + 1
         end
     end
@@ -258,14 +277,22 @@ function FT:StartRun()
         return
     end
 
-    if self:GetValidCount() == 0 then
-        self:Print("Please add at least one item with a target amount.")
-        return
+    local considerTargets = self.db.considerTargets ~= false
+    if considerTargets then
+        if self:GetValidCount() == 0 then
+            self:Print("Please add at least one item with a target amount.")
+            return
+        end
+    else
+        if self:GetTrackableCount() == 0 then
+            self:Print("Please add at least one item to track.")
+            return
+        end
     end
 
     self.baseline = {}
     for i, item in ipairs(self.db.items) do
-        if self:IsValidItem(item) then
+        if self:IsTrackableItem(item) then
             local itemID = tonumber(item.itemID)
             self.baseline[i] = GetItemCount(itemID, false)
         else
@@ -380,12 +407,14 @@ end
 
 function FT:RefreshProgress()
     local completed = 0
-    local valid = 0
+    local targetable = 0
+    local trackable = 0
+    local considerTargets = self.db.considerTargets ~= false
 
     for i, item in ipairs(self.db.items) do
         local current = 0
-        if self:IsValidItem(item) then
-            valid = valid + 1
+        if self:IsTrackableItem(item) then
+            trackable = trackable + 1
             local itemID = tonumber(item.itemID)
             local base = self.baseline and self.baseline[i] or 0
             if self.running then
@@ -393,8 +422,12 @@ function FT:RefreshProgress()
             else
                 current = 0
             end
-            if current >= tonumber(item.target) then
-                completed = completed + 1
+            local target = tonumber(item.target) or 0
+            if considerTargets and target > 0 then
+                targetable = targetable + 1
+                if current >= target then
+                    completed = completed + 1
+                end
             end
         end
         item.current = current
@@ -404,10 +437,14 @@ function FT:RefreshProgress()
         self:UpdateRows()
     end
     if self.UpdateSummary then
-        self:UpdateSummary(completed, valid)
+        if considerTargets then
+            self:UpdateSummary(completed, targetable)
+        else
+            self:UpdateSummary(0, trackable)
+        end
     end
 
-    if self.running and not self.paused and valid > 0 and completed == valid then
+    if self.running and not self.paused and considerTargets and targetable > 0 and completed == targetable then
         self:CompleteRun()
     end
 end
