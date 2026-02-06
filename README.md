@@ -12,6 +12,8 @@ A simple WoW addon that tracks your farming time and stops automatically when al
 - Minimap button (toggleable).
 - Save, load, and delete presets.
 - Optional: use target amounts (auto-stop) or just track time and counts.
+- Export/import all presets or just a selected preset.
+- Import with merge mode (do not overwrite existing presets).
 
 ## Installation
 1. Copy the `FarmingTimer` folder to `World of Warcraft/_retail_/Interface/AddOns/`.
@@ -36,6 +38,10 @@ A simple WoW addon that tracks your farming time and stops automatically when al
 - **Load**: loads the selected preset.
 - **Delete**: deletes the selected preset.
 - **Use target amounts**: if enabled, timer auto-stops when all targets are met. If disabled, the timer runs and only counts items.
+- **Export All**: exports all presets into a shareable string.
+- **Export Selected**: exports only the currently selected preset.
+- **Import**: paste a previously exported string to restore presets.
+- **Merge (do not overwrite)**: keeps existing presets and skips duplicates.
 
 ## Progress / Counting
 - Counts are **net since start**:

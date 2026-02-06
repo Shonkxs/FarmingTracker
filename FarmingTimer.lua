@@ -53,6 +53,383 @@ function FT:NormalizePresetName(name)
     return name
 end
 
+function FT:Base64Encode(data)
+    local b = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    return ((data:gsub(".", function(x)
+        local r = ""
+        local byte = x:byte()
+        for i = 8, 1, -1 do
+            local bit = byte % 2 ^ i - byte % 2 ^ (i - 1)
+            r = r .. (bit > 0 and "1" or "0")
+        end
+        return r
+    end) .. "0000"):gsub("%d%d%d?%d?%d?%d?", function(x)
+        if #x < 6 then
+            return ""
+        end
+        local c = 0
+        for i = 1, 6 do
+            if x:sub(i, i) == "1" then
+                c = c + 2 ^ (6 - i)
+            end
+        end
+        return b:sub(c + 1, c + 1)
+    end) .. ({ "", "==", "=" })[#data % 3 + 1])
+end
+
+function FT:Base64Decode(data)
+    local b = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    data = data:gsub("[^" .. b .. "=]", "")
+    return (data:gsub(".", function(x)
+        if x == "=" then
+            return ""
+        end
+        local r = ""
+        local f = (b:find(x) or 1) - 1
+        for i = 6, 1, -1 do
+            local bit = f % 2 ^ i - f % 2 ^ (i - 1)
+            r = r .. (bit > 0 and "1" or "0")
+        end
+        return r
+    end):gsub("%d%d%d?%d?%d?%d?%d?%d?", function(x)
+        if #x ~= 8 then
+            return ""
+        end
+        local c = 0
+        for i = 1, 8 do
+            if x:sub(i, i) == "1" then
+                c = c + 2 ^ (8 - i)
+            end
+        end
+        return string.char(c)
+    end))
+end
+
+function FT:Base64EncodeUrl(data)
+    local encoded = self:Base64Encode(data or "")
+    encoded = encoded:gsub("%+", "-"):gsub("/", "_"):gsub("=", "")
+    return encoded
+end
+
+function FT:Base64DecodeUrl(data)
+    if not data then
+        return nil
+    end
+    local decoded = data:gsub("-", "+"):gsub("_", "/")
+    local pad = #decoded % 4
+    if pad > 0 then
+        decoded = decoded .. string.rep("=", 4 - pad)
+    end
+    return self:Base64Decode(decoded)
+end
+
+function FT:GetSelectedPresetName()
+    if self.frame and self.frame.presetNameBox then
+        local name = self:NormalizePresetName(self.frame.presetNameBox:GetText())
+        if name then
+            return name
+        end
+    end
+    if self.selectedPreset then
+        return self.selectedPreset
+    end
+    if self.db and self.db.lastPreset then
+        return self.db.lastPreset
+    end
+    return nil
+end
+
+function FT:BuildExportString(names)
+    if not self.accountDb or not self.accountDb.presets then
+        return nil, "No presets available."
+    end
+
+    local exportNames = {}
+    if type(names) == "string" then
+        local normalized = self:NormalizePresetName(names)
+        if normalized then
+            exportNames = { normalized }
+        end
+    elseif type(names) == "table" then
+        exportNames = names
+    else
+        exportNames = self:GetPresetNamesSorted()
+    end
+
+    if #exportNames == 0 then
+        return nil, "No presets available."
+    end
+
+    local lines = { "v=1" }
+    for _, name in ipairs(exportNames) do
+        local items = self.accountDb.presets[name]
+        if type(items) == "table" then
+            local itemParts = {}
+            for _, item in ipairs(items) do
+                local itemID = tonumber(item.itemID)
+                local target = tonumber(item.target) or 0
+                if itemID and itemID > 0 then
+                    if target < 0 then
+                        target = 0
+                    end
+                    table.insert(itemParts, string.format("%d,%d", itemID, target))
+                end
+            end
+            if #itemParts > 0 then
+                local line = string.format("%d:%s:%d:%s", #name, name, #itemParts, table.concat(itemParts, ";"))
+                table.insert(lines, line)
+            end
+        end
+    end
+
+    if #lines == 1 then
+        return nil, "No presets available."
+    end
+
+    local raw = table.concat(lines, "\n")
+    return "FT1:" .. self:Base64EncodeUrl(raw)
+end
+
+function FT:ImportPresetsLegacy(data, merge)
+    if type(data) ~= "string" then
+        self:Print("Import failed: invalid data.")
+        return
+    end
+
+    data = self:NormalizePresetName(data)
+    if not data or data == "" then
+        self:Print("Import failed: empty data.")
+        return
+    end
+
+    if not data:match("^FT1;") then
+        self:Print("Import failed: invalid format.")
+        return
+    end
+
+    local imported = 0
+    local totalItems = 0
+    local skipped = 0
+
+    for entry in data:gmatch("([^;]+)") do
+        if entry ~= "FT1" then
+            local nameEncoded, itemList = entry:match("^([^=]+)=(.*)$")
+            if nameEncoded and itemList then
+                local name = self:NormalizePresetName(nameEncoded)
+                if name then
+                    local items = {}
+                    for pair in itemList:gmatch("([^,]+)") do
+                        local itemID, target = pair:match("^(%d+):(%d+)$")
+                        if itemID then
+                            table.insert(items, {
+                                itemID = tonumber(itemID),
+                                target = tonumber(target) or 0,
+                            })
+                        end
+                    end
+                    if #items > 0 then
+                        if merge and self.accountDb.presets[name] then
+                            skipped = skipped + 1
+                        else
+                            self.accountDb.presets[name] = items
+                            imported = imported + 1
+                            totalItems = totalItems + #items
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if imported == 0 then
+        self:Print("Import completed: no presets found.")
+        return
+    end
+
+    if self.RefreshPresetDropdown then
+        self:RefreshPresetDropdown()
+    end
+    if skipped > 0 then
+        self:Print(string.format("Imported %d presets (%d items), skipped %d.", imported, totalItems, skipped))
+    else
+        self:Print(string.format("Imported %d presets (%d items).", imported, totalItems))
+    end
+end
+
+function FT:ImportPresets(data, merge)
+    if type(data) ~= "string" then
+        self:Print("Import failed: invalid data.")
+        return
+    end
+
+    data = self:NormalizePresetName(data)
+    if not data or data == "" then
+        self:Print("Import failed: empty data.")
+        return
+    end
+
+    if data:match("^FT1;") then
+        self:ImportPresetsLegacy(data, merge)
+        return
+    end
+
+    if not data:match("^FT1:") then
+        self:Print("Import failed: invalid format.")
+        return
+    end
+
+    local payload = data:sub(5)
+    local raw = self:Base64DecodeUrl(payload)
+    if not raw or raw == "" then
+        self:Print("Import failed: invalid data.")
+        return
+    end
+
+    local lines = {}
+    for line in raw:gmatch("[^\n]+") do
+        table.insert(lines, line)
+    end
+
+    if #lines == 0 or lines[1] ~= "v=1" then
+        self:Print("Import failed: unsupported version.")
+        return
+    end
+
+    local imported = 0
+    local totalItems = 0
+    local skipped = 0
+
+    for i = 2, #lines do
+        local line = lines[i]
+        local lenStr, rest = line:match("^(%d+):(.*)$")
+        local nameLen = tonumber(lenStr)
+        if nameLen and rest and #rest >= nameLen + 2 then
+            local name = rest:sub(1, nameLen)
+            local after = rest:sub(nameLen + 1)
+            if after:sub(1, 1) == ":" then
+                after = after:sub(2)
+                local countStr, itemList = after:match("^(%d+):(.*)$")
+                if countStr and itemList then
+                    local items = {}
+                    for pair in itemList:gmatch("([^;]+)") do
+                        local itemID, target = pair:match("^(%d+),(%-?%d+)$")
+                        if itemID then
+                            local t = tonumber(target) or 0
+                            if t < 0 then
+                                t = 0
+                            end
+                            table.insert(items, { itemID = tonumber(itemID), target = t })
+                        end
+                    end
+                    if #items > 0 then
+                        if merge and self.accountDb.presets[name] then
+                            skipped = skipped + 1
+                        else
+                            self.accountDb.presets[name] = items
+                            imported = imported + 1
+                            totalItems = totalItems + #items
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if imported == 0 then
+        self:Print("Import completed: no presets found.")
+        return
+    end
+
+    if self.RefreshPresetDropdown then
+        self:RefreshPresetDropdown()
+    end
+    if skipped > 0 then
+        self:Print(string.format("Imported %d presets (%d items), skipped %d.", imported, totalItems, skipped))
+    else
+        self:Print(string.format("Imported %d presets (%d items).", imported, totalItems))
+    end
+end
+
+function FT:EnsurePopupDialogs()
+    if self.popupsReady then
+        return
+    end
+    self.popupsReady = true
+
+    StaticPopupDialogs["FARMINGTIMER_EXPORT"] = {
+        text = "Export preset data",
+        button1 = "Close",
+        hasEditBox = true,
+        editBoxWidth = 320,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        OnShow = function(self, data)
+            local payload = self.data or data or ""
+            self.editBox:SetText(payload)
+            self.editBox:HighlightText()
+            self.editBox:SetFocus()
+        end,
+        EditBoxOnEnterPressed = function(self)
+            self:GetParent():Hide()
+        end,
+        EditBoxOnEscapePressed = function(self)
+            self:GetParent():Hide()
+        end,
+    }
+
+    StaticPopupDialogs["FARMINGTIMER_IMPORT"] = {
+        text = "Import preset data",
+        button1 = "Import",
+        button2 = "Cancel",
+        hasEditBox = true,
+        editBoxWidth = 320,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        OnShow = function(self)
+            self.editBox:SetText("")
+            self.editBox:SetFocus()
+        end,
+        OnAccept = function(self)
+            FT:ImportPresets(self.editBox:GetText())
+        end,
+        EditBoxOnEnterPressed = function(self)
+            FT:ImportPresets(self:GetText())
+            self:GetParent():Hide()
+        end,
+    }
+end
+
+function FT:ShowExportDialog(presetName)
+    local exportString, err = self:BuildExportString(presetName)
+    if not exportString then
+        self:Print(err or "No presets available.")
+        return
+    end
+    if self.ShowTransferFrame then
+        self:ShowTransferFrame("export", exportString)
+        return
+    end
+    self:EnsurePopupDialogs()
+    local dialog = StaticPopup_Show("FARMINGTIMER_EXPORT")
+    if dialog and dialog.editBox then
+        dialog.data = exportString
+        dialog.editBox:SetText(exportString)
+        dialog.editBox:HighlightText()
+        dialog.editBox:SetFocus()
+    end
+end
+
+function FT:ShowImportDialog()
+    if self.ShowTransferFrame then
+        self:ShowTransferFrame("import", "")
+        return
+    end
+    self:EnsurePopupDialogs()
+    StaticPopup_Show("FARMINGTIMER_IMPORT")
+end
+
 function FT:GetPresetNamesSorted()
     local names = {}
     if not self.accountDb or not self.accountDb.presets then
@@ -97,13 +474,13 @@ function FT:SavePreset(name)
 
     local items = {}
     for _, item in ipairs(self.db.items) do
-        if self:IsValidItem(item) then
-            table.insert(items, { itemID = tonumber(item.itemID), target = tonumber(item.target) })
+        if self:IsTrackableItem(item) then
+            table.insert(items, { itemID = tonumber(item.itemID), target = tonumber(item.target) or 0 })
         end
     end
 
     if #items == 0 then
-        self:Print("No valid items to save.")
+        self:Print("No items to save.")
         return
     end
 
@@ -140,8 +517,8 @@ function FT:LoadPreset(name)
     local items = {}
     for _, entry in ipairs(preset) do
         local itemID = tonumber(entry.itemID)
-        local target = tonumber(entry.target)
-        if itemID and itemID > 0 and target and target > 0 then
+        local target = tonumber(entry.target) or 0
+        if itemID and itemID > 0 then
             table.insert(items, { itemID = itemID, target = target })
         end
     end

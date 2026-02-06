@@ -61,6 +61,136 @@ function FT:RefreshPresetDropdown()
     end
 end
 
+function FT:ShowTransferFrame(mode, payload)
+    if not self.transferFrame then
+        self:CreateTransferFrame()
+    end
+    local frame = self.transferFrame
+    frame.mode = mode
+    if mode == "import" then
+        frame.title:SetText("Import Presets")
+        frame.actionButton:SetText("Import")
+        frame.actionButton:Show()
+        frame.mergeCheck:Show()
+        frame.mergeCheck:SetChecked(true)
+        frame.editBox:SetText("")
+    else
+        frame.title:SetText("Export Presets")
+        frame.actionButton:Hide()
+        frame.mergeCheck:Hide()
+        frame.editBox:SetText(payload or "")
+    end
+
+    if frame.updateTransferBoxSize then
+        frame.updateTransferBoxSize()
+    end
+    frame.editBox:HighlightText()
+    frame.editBox:SetFocus()
+    frame:Show()
+end
+
+function FT:CreateTransferFrame()
+    if self.transferFrame then
+        return
+    end
+
+    local frame = CreateFrame("Frame", "FarmingTimerTransferFrame", UIParent, "BackdropTemplate")
+    frame:SetSize(420, 230)
+    frame:SetPoint("CENTER")
+    frame:SetFrameStrata("DIALOG")
+    frame:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true,
+        tileSize = 32,
+        edgeSize = 32,
+        insets = { left = 8, right = 8, top = 8, bottom = 8 },
+    })
+    frame:Hide()
+
+    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", 0, -12)
+    title:SetText("Export Presets")
+    frame.title = title
+
+    local closeButton = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+    closeButton:SetPoint("TOPRIGHT", -6, -6)
+    closeButton:SetScript("OnClick", function()
+        frame:Hide()
+    end)
+
+    local scrollFrame = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 16, -40)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -30, 56)
+
+    local scrollChild = CreateFrame("Frame", nil, scrollFrame)
+    scrollChild:SetSize(1, 1)
+    scrollFrame:SetScrollChild(scrollChild)
+
+    local editBox = CreateFrame("EditBox", nil, scrollChild, "BackdropTemplate")
+    editBox:SetMultiLine(true)
+    editBox:SetFontObject("ChatFontNormal")
+    editBox:SetAutoFocus(false)
+    editBox:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, 0)
+    editBox:SetPoint("BOTTOMRIGHT", scrollChild, "BOTTOMRIGHT", 0, 0)
+    editBox:SetBackdrop({
+        bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeFile = "Interface\\ChatFrame\\ChatFrameBackground",
+        edgeSize = 1,
+    })
+    editBox:SetBackdropColor(0, 0, 0, 0.5)
+    editBox:SetBackdropBorderColor(0.2, 0.2, 0.2, 0.8)
+    editBox:SetTextInsets(6, 6, 6, 6)
+    editBox:SetScript("OnCursorChanged", function(self, x, y, w, h)
+        scrollFrame:UpdateScrollChildRect()
+        local height = scrollFrame:GetHeight()
+        if h and h > height then
+            scrollFrame:SetVerticalScroll(-y - height)
+        end
+    end)
+    editBox:SetScript("OnTextChanged", function()
+        scrollFrame:UpdateScrollChildRect()
+    end)
+
+    local function updateTransferBoxSize()
+        local width = scrollFrame:GetWidth()
+        local height = scrollFrame:GetHeight()
+        if width and width > 0 then
+            scrollChild:SetWidth(width)
+        end
+        if height and height > 0 then
+            scrollChild:SetHeight(height)
+        end
+    end
+
+    scrollFrame:SetScript("OnSizeChanged", updateTransferBoxSize)
+    frame:SetScript("OnShow", function()
+        updateTransferBoxSize()
+    end)
+
+    local mergeCheck = CreateFrame("CheckButton", nil, frame, "UICheckButtonTemplate")
+    mergeCheck:SetPoint("BOTTOMLEFT", 16, 18)
+    local mergeLabel = mergeCheck:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    mergeLabel:SetPoint("LEFT", mergeCheck, "RIGHT", 4, 0)
+    mergeLabel:SetText("Merge (do not overwrite)")
+
+    local actionButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    actionButton:SetSize(80, 22)
+    actionButton:SetPoint("BOTTOMRIGHT", -16, 16)
+    actionButton:SetText("Import")
+    actionButton:SetScript("OnClick", function()
+        FT:ImportPresets(editBox:GetText(), mergeCheck:GetChecked())
+        frame:Hide()
+    end)
+
+    frame.editBox = editBox
+    frame.updateTransferBoxSize = updateTransferBoxSize
+    frame.mergeCheck = mergeCheck
+    frame.actionButton = actionButton
+
+    self.transferFrame = frame
+end
+
 function FT:SetTimerText(text)
     if self.frame and self.frame.timerText then
         self.frame.timerText:SetText(text or "00:00")
@@ -386,6 +516,15 @@ function FT:UpdateControls()
             end
         end
     end
+    if self.frame.exportAllButton then
+        self.frame.exportAllButton:SetEnabled(not isRunning)
+    end
+    if self.frame.exportSelectedButton then
+        self.frame.exportSelectedButton:SetEnabled(not isRunning)
+    end
+    if self.frame.importButton then
+        self.frame.importButton:SetEnabled(not isRunning)
+    end
 
     for _, row in ipairs(self.rows) do
         row.itemButton:SetEnabled(not isRunning)
@@ -530,9 +669,51 @@ function FT:InitUI()
     frame.targetCheck = targetCheck
     frame.targetCheckLabel = targetLabel
 
+    local transferRow = CreateFrame("Frame", nil, frame)
+    transferRow:SetPoint("TOPLEFT", 18, -122)
+    transferRow:SetPoint("TOPRIGHT", -18, -122)
+    transferRow:SetHeight(22)
+
+    local transferLabel = transferRow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    transferLabel:SetPoint("LEFT", 2, 0)
+    transferLabel:SetText("Transfer")
+
+    local exportAllButton = CreateFrame("Button", nil, transferRow, "UIPanelButtonTemplate")
+    exportAllButton:SetSize(78, 20)
+    exportAllButton:SetPoint("RIGHT", transferRow, "RIGHT", -2, 0)
+    exportAllButton:SetText("Export All")
+    exportAllButton:SetScript("OnClick", function()
+        FT:ShowExportDialog()
+    end)
+
+    local exportSelectedButton = CreateFrame("Button", nil, transferRow, "UIPanelButtonTemplate")
+    exportSelectedButton:SetSize(96, 20)
+    exportSelectedButton:SetPoint("RIGHT", exportAllButton, "LEFT", -6, 0)
+    exportSelectedButton:SetText("Export Selected")
+    exportSelectedButton:SetScript("OnClick", function()
+        local name = FT:GetSelectedPresetName()
+        if not name then
+            FT:Print("Please select a preset.")
+            return
+        end
+        FT:ShowExportDialog(name)
+    end)
+
+    local importButton = CreateFrame("Button", nil, transferRow, "UIPanelButtonTemplate")
+    importButton:SetSize(60, 20)
+    importButton:SetPoint("RIGHT", exportSelectedButton, "LEFT", -6, 0)
+    importButton:SetText("Import")
+    importButton:SetScript("OnClick", function()
+        FT:ShowImportDialog()
+    end)
+
+    frame.exportAllButton = exportAllButton
+    frame.exportSelectedButton = exportSelectedButton
+    frame.importButton = importButton
+
     local header = CreateFrame("Frame", nil, frame)
-    header:SetPoint("TOPLEFT", 18, -132)
-    header:SetPoint("TOPRIGHT", -34, -132)
+    header:SetPoint("TOPLEFT", 18, -156)
+    header:SetPoint("TOPRIGHT", -34, -156)
     header:SetHeight(16)
 
     local headerItem = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -552,7 +733,7 @@ function FT:InitUI()
     headerCurrent:SetText("Progress")
 
     local scrollFrame = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 18, -150)
+    scrollFrame:SetPoint("TOPLEFT", 18, -174)
     scrollFrame:SetPoint("BOTTOMRIGHT", -34, 54)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
