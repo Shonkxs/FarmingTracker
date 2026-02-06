@@ -9,7 +9,7 @@ A simple WoW addon that tracks your farming time and stops automatically when al
 - Start / Pause / Resume / Stop / Reset.
 - Auto-stop with a success sound when all targets are met.
 - Movable main window plus Options panel.
-- Main window height is resizable (drag the bottom-left handle).
+- Main window height is resizable (drag the bottom-right handle).
 - Minimap button (toggleable).
 - Save, load, and delete presets.
 - Optional: use target amounts (auto-stop) or just track time and counts.

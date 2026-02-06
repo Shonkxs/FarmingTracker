@@ -658,7 +658,7 @@ function FT:InitUI()
 
     local resizeHandle = CreateFrame("Button", nil, frame)
     resizeHandle:SetSize(16, 16)
-    resizeHandle:SetPoint("BOTTOMLEFT", 6, 6)
+    resizeHandle:SetPoint("BOTTOMRIGHT", -6, 6)
     resizeHandle:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
     resizeHandle:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
     resizeHandle:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
@@ -666,7 +666,7 @@ function FT:InitUI()
         if button ~= "LeftButton" then
             return
         end
-        frame:StartSizing("BOTTOM")
+        frame:StartSizing("BOTTOMRIGHT")
     end)
     resizeHandle:SetScript("OnMouseUp", function(_, button)
         if button ~= "LeftButton" then
