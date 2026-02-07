@@ -529,6 +529,7 @@ function FT:LoadPreset(name)
     self.baseline = {}
     for _, item in ipairs(self.db.items) do
         item.current = 0
+        item._baseline = 0
     end
     self.elapsed = 0
 
@@ -637,6 +638,39 @@ function FT:IsTrackableItem(item)
     return itemID and itemID > 0
 end
 
+function FT:EnsureSortIndex()
+    if not self.db or not self.db.items then
+        return
+    end
+    for i, item in ipairs(self.db.items) do
+        if item._sortIndex == nil then
+            item._sortIndex = i
+        end
+    end
+end
+
+function FT:SortItemsByProgress()
+    if not self.db or not self.db.items then
+        return
+    end
+    self:EnsureSortIndex()
+    table.sort(self.db.items, function(a, b)
+        local aTrack = self:IsTrackableItem(a)
+        local bTrack = self:IsTrackableItem(b)
+        if aTrack ~= bTrack then
+            return aTrack
+        end
+        local aCur = tonumber(a.current) or 0
+        local bCur = tonumber(b.current) or 0
+        if aCur ~= bCur then
+            return aCur > bCur
+        end
+        local aIdx = a._sortIndex or 0
+        local bIdx = b._sortIndex or 0
+        return aIdx < bIdx
+    end)
+end
+
 function FT:GetValidCount()
     local count = 0
     for _, item in ipairs(self.db.items) do
@@ -681,9 +715,13 @@ function FT:StartRun()
 
     self.baseline = {}
     for i, item in ipairs(self.db.items) do
+        item._sortIndex = i
+        item._baseline = 0
         if self:IsTrackableItem(item) then
             local itemID = self:GetItemIDFromItem(item)
-            self.baseline[i] = GetItemCount(itemID, false)
+            local count = GetItemCount(itemID, false)
+            item._baseline = count
+            self.baseline[i] = count
         else
             self.baseline[i] = 0
         end
@@ -757,6 +795,7 @@ function FT:ResetRun()
     self.baseline = {}
     for _, item in ipairs(self.db.items) do
         item.current = 0
+        item._baseline = 0
     end
     self:RefreshProgress()
 end
@@ -805,7 +844,7 @@ function FT:RefreshProgress()
         if self:IsTrackableItem(item) then
             trackable = trackable + 1
             local itemID = self:GetItemIDFromItem(item)
-            local base = self.baseline and self.baseline[i] or 0
+            local base = item._baseline or (self.baseline and self.baseline[i]) or 0
             if self.running then
                 current = GetItemCount(itemID, false) - base
             else
@@ -820,6 +859,10 @@ function FT:RefreshProgress()
             end
         end
         item.current = current
+    end
+
+    if self.running and not self.paused then
+        self:SortItemsByProgress()
     end
 
     if self.UpdateRows then
