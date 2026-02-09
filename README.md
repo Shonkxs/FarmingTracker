@@ -31,6 +31,7 @@ A simple WoW addon that tracks your farming time and stops automatically when al
 ## Modes
 - **Targets**: configure items + targets, optional auto-stop when all targets are met.
 - **All Items**: tracks every item you collect while the mode is running (net change since start). No manual item setup required.
+- **Auction House values** (All Items): open the Auction House first so the addon can scan reagent prices; values are then taken from the saved scan.
 
 ## Main Window Controls
 - **Add Item**: adds a new row.
@@ -58,6 +59,7 @@ A simple WoW addon that tracks your farming time and stops automatically when al
 - If you consume/turn in items during the run, progress can go down.
 - Only items in your bags are counted (no bank).
 - In **All Items** mode, the collected list remains visible after **Stop** and clears on **Reset**.
+- AH prices only update after a reagent scan (with the Auction House open).
 
 ## Options (Interface -> AddOns -> FarmingTimer)
 - **Open FarmingTimer**: opens the main window.

@@ -9,6 +9,8 @@ FT.MODES = {
     ALL = "all",
 }
 
+FT.useBrowseScan = true
+
 local DEFAULTS = {
     version = 2,
     items = {},
@@ -43,7 +45,23 @@ function FT:InitDB()
     self.db = FarmingTimerDB
     self.accountDb = FarmingTimerAccountDB
     self.accountDb.presets = self.accountDb.presets or {}
+    self.accountDb.ahPrices = self.accountDb.ahPrices or {}
     self:GetActiveMode()
+end
+
+function FT:GetRealmKey()
+    local realm = GetRealmName and GetRealmName() or "Unknown"
+    return realm or "Unknown"
+end
+
+function FT:GetAHPriceBucket()
+    if not self.accountDb then
+        return nil
+    end
+    self.accountDb.ahPrices = self.accountDb.ahPrices or {}
+    local key = self:GetRealmKey()
+    self.accountDb.ahPrices[key] = self.accountDb.ahPrices[key] or {}
+    return self.accountDb.ahPrices[key]
 end
 
 function FT:GetActiveMode()
@@ -799,6 +817,560 @@ function FT:ScanBagCounts()
     return counts
 end
 
+function FT:FindItemLocation(itemID)
+    if not itemID or not ItemLocation or not C_Container or not C_Container.GetContainerNumSlots then
+        return nil
+    end
+    for _, bag in ipairs(self:GetBagIds()) do
+        local numSlots = C_Container.GetContainerNumSlots(bag)
+        if numSlots and numSlots > 0 then
+            for slot = 1, numSlots do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                if info and info.itemID == itemID then
+                    return ItemLocation:CreateFromBagAndSlot(bag, slot)
+                end
+            end
+        end
+    end
+    return nil
+end
+
+function FT:FindCategoryByName(categories, name)
+    if type(categories) ~= "table" then
+        return nil
+    end
+    for _, c in ipairs(categories) do
+        if c and c.name == name then
+            return c
+        end
+        local found = self:FindCategoryByName(c.subCategories, name)
+        if found then
+            return found
+        end
+    end
+    return nil
+end
+
+function FT:CollectLeafCategories(node, out)
+    if not node then
+        return
+    end
+    if node.subCategories and #node.subCategories > 0 then
+        for _, sub in ipairs(node.subCategories) do
+            self:CollectLeafCategories(sub, out)
+        end
+        return
+    end
+    if node.filters then
+        table.insert(out, { name = node.name or "Reagents", filters = node.filters })
+    end
+end
+
+function FT:GetReagentFilterSets()
+    local filterSets = {}
+    if type(_G.AuctionCategories) == "table" and _G.AUCTION_CATEGORY_TRADE_GOODS then
+        local tradeGoods = self:FindCategoryByName(_G.AuctionCategories, _G.AUCTION_CATEGORY_TRADE_GOODS)
+        if tradeGoods then
+            self:CollectLeafCategories(tradeGoods, filterSets)
+            if #filterSets == 0 and tradeGoods.filters then
+                table.insert(filterSets, { name = tradeGoods.name or "Reagents", filters = tradeGoods.filters })
+            end
+        end
+    end
+
+    if #filterSets == 0 then
+        if Enum and Enum.ItemClass and Enum.ItemClass.Tradegoods then
+            table.insert(filterSets, { name = "Trade Goods", filters = { { classID = Enum.ItemClass.Tradegoods } } })
+        else
+            table.insert(filterSets, { name = "Reagents", filters = {} })
+        end
+    end
+    return filterSets
+end
+
+function FT:IsItemAuctionable(itemID)
+    if not C_AuctionHouse or not C_AuctionHouse.IsSellItem then
+        return nil, false
+    end
+    local loc = self:FindItemLocation(itemID)
+    if not loc then
+        return nil, false
+    end
+    return C_AuctionHouse.IsSellItem(loc), true
+end
+
+function FT:GetServerTimestamp()
+    if GetServerTime then
+        return GetServerTime()
+    end
+    return time()
+end
+
+function FT:GetCachedPrice(itemID)
+    local bucket = self:GetAHPriceBucket()
+    if not bucket then
+        return nil, nil, nil
+    end
+    local entry = bucket[itemID]
+    if not entry then
+        return nil, nil, nil
+    end
+    return entry.unitPrice, entry.auctionable, entry.lastUpdated
+end
+
+function FT:SetCachedPrice(itemID, unitPrice, auctionable)
+    local bucket = self:GetAHPriceBucket()
+    if not bucket or not itemID then
+        return
+    end
+    bucket[itemID] = {
+        unitPrice = unitPrice,
+        auctionable = auctionable and true or false,
+        lastUpdated = self:GetServerTimestamp(),
+    }
+end
+
+function FT:SetCachedPriceMin(itemID, unitPrice)
+    if not itemID or not unitPrice then
+        return
+    end
+    local existing = self:GetCachedPrice(itemID)
+    if existing and existing > 0 and existing <= unitPrice then
+        return
+    end
+    self:SetCachedPrice(itemID, unitPrice, true)
+end
+
+function FT:IsPriceFresh(itemID)
+    local unitPrice, auctionable, lastUpdated = self:GetCachedPrice(itemID)
+    if not lastUpdated then
+        return false
+    end
+    local now = self:GetServerTimestamp()
+    local ttl
+    if auctionable == false and not unitPrice then
+        ttl = 2 * 60 * 60
+    else
+        ttl = 15 * 60
+    end
+    return (now - lastUpdated) <= ttl
+end
+
+function FT:EnsurePrice(itemID)
+    if self.useBrowseScan then
+        return
+    end
+    if not itemID then
+        return
+    end
+    if self:IsPriceFresh(itemID) then
+        return
+    end
+    local auctionable, hasLocation = self:IsItemAuctionable(itemID)
+    if auctionable == false then
+        self:SetCachedPrice(itemID, nil, false)
+        return
+    end
+    if not self.ahAvailable then
+        self:EnqueuePendingPrice(itemID)
+        return
+    end
+    self:EnqueuePrice(itemID, auctionable, hasLocation)
+end
+
+function FT:EnqueuePendingPrice(itemID)
+    if not itemID then
+        return
+    end
+    self.ahPending = self.ahPending or {}
+    self.ahPendingSet = self.ahPendingSet or {}
+    if self.ahPendingSet[itemID] then
+        return
+    end
+    table.insert(self.ahPending, itemID)
+    self.ahPendingSet[itemID] = true
+end
+
+function FT:EnqueuePrice(itemID, auctionable, hasLocation)
+    self.ahQueue = self.ahQueue or {}
+    self.ahQueueSet = self.ahQueueSet or {}
+    if self.ahQueueSet[itemID] or (self.ahInFlight and self.ahInFlight.itemID == itemID) then
+        return
+    end
+    table.insert(self.ahQueue, { itemID = itemID, auctionable = auctionable, hasLocation = hasLocation })
+    self.ahQueueSet[itemID] = true
+end
+
+function FT:GetItemKey(itemID)
+    if C_AuctionHouse and C_AuctionHouse.MakeItemKey then
+        return C_AuctionHouse.MakeItemKey(itemID)
+    end
+    return nil
+end
+
+function FT:IsCommodity(itemID)
+    if C_AuctionHouse and C_AuctionHouse.GetItemCommodityStatus and Enum and Enum.ItemCommodityStatus then
+        local status = C_AuctionHouse.GetItemCommodityStatus(itemID)
+        if status == Enum.ItemCommodityStatus.Commodity then
+            return true
+        end
+        if status == Enum.ItemCommodityStatus.Item then
+            return false
+        end
+    end
+    if C_AuctionHouse and C_AuctionHouse.IsCommodity then
+        return C_AuctionHouse.IsCommodity(itemID)
+    end
+    return false
+end
+
+function FT:StartAHTicker()
+    if self.ahTicker then
+        return
+    end
+    self.ahTicker = C_Timer.NewTicker(0.4, function()
+        self:ProcessPriceQueue()
+    end)
+end
+
+function FT:StopAHTicker()
+    if self.ahTicker then
+        self.ahTicker:Cancel()
+        self.ahTicker = nil
+    end
+end
+
+function FT:ProcessPriceQueue()
+    if not self.ahAvailable or not C_AuctionHouse or not C_AuctionHouse.SendSearchQuery then
+        return
+    end
+    if self.ahInFlight then
+        return
+    end
+    self.ahQueue = self.ahQueue or {}
+    self.ahQueueSet = self.ahQueueSet or {}
+    if #self.ahQueue == 0 then
+        return
+    end
+    local now = GetTime()
+    self.ahNextQueryAt = self.ahNextQueryAt or 0
+    if now < self.ahNextQueryAt then
+        return
+    end
+
+    local payload = table.remove(self.ahQueue, 1)
+    if not payload or not payload.itemID then
+        return
+    end
+    self.ahQueueSet[payload.itemID] = nil
+
+    if self:IsPriceFresh(payload.itemID) then
+        return
+    end
+
+    local itemKey = self:GetItemKey(payload.itemID)
+    if not itemKey then
+        self:SetCachedPrice(payload.itemID, nil, false)
+        return
+    end
+
+    local isCommodity = self:IsCommodity(payload.itemID)
+    if C_AuctionHouse.CanSendSearchQuery and not C_AuctionHouse.CanSendSearchQuery() then
+        self.ahNextQueryAt = now + 0.4
+        table.insert(self.ahQueue, 1, payload)
+        self.ahQueueSet[payload.itemID] = true
+        return
+    end
+
+    self.ahInFlight = {
+        itemID = payload.itemID,
+        itemKey = itemKey,
+        isCommodity = isCommodity,
+        auctionable = payload.auctionable,
+        hasLocation = payload.hasLocation,
+    }
+
+    C_AuctionHouse.SendSearchQuery(itemKey, {}, false)
+    self.ahNextQueryAt = now + 0.4
+end
+
+function FT:HandlePriceResult(itemID, unitPrice)
+    local inflight = self.ahInFlight
+    if not inflight or inflight.itemID ~= itemID then
+        return
+    end
+
+    local auctionable = inflight.auctionable
+    if unitPrice and unitPrice > 0 then
+        self:SetCachedPrice(itemID, unitPrice, true)
+    else
+        if auctionable == nil and not inflight.hasLocation then
+            self:SetCachedPrice(itemID, nil, false)
+        else
+            self:SetCachedPrice(itemID, nil, auctionable ~= false)
+        end
+    end
+
+    self.ahInFlight = nil
+    if self.UpdateRows then
+        self:UpdateRows(self.MODES.ALL)
+    end
+    if self.UpdateSummary then
+        self:UpdateSummary(self.MODES.ALL)
+    end
+end
+
+function FT:StartReagentScan()
+    if not self.ahAvailable or not C_AuctionHouse or not C_AuctionHouse.SendBrowseQuery then
+        return
+    end
+    if self.ahScan and self.ahScan.inProgress then
+        return
+    end
+    local filters = self:GetReagentFilterSets()
+    if #filters == 0 then
+        return
+    end
+    self.ahScan = {
+        inProgress = true,
+        filters = filters,
+        index = 1,
+        total = #filters,
+        lastResultAt = GetTime(),
+        querySentAt = 0,
+    }
+    self.ahScanReady = false
+    if self.ShowScanProgress then
+        self:ShowScanProgress(0, "Scanning AH...")
+    end
+    self:StartScanTicker()
+    self:SendReagentBrowseQuery()
+end
+
+function FT:StartScanTicker()
+    if self.ahScanTicker then
+        return
+    end
+    self.ahScanTicker = C_Timer.NewTicker(0.5, function()
+        self:PollReagentScan()
+    end)
+end
+
+function FT:StopScanTicker()
+    if self.ahScanTicker then
+        self.ahScanTicker:Cancel()
+        self.ahScanTicker = nil
+    end
+end
+
+function FT:SendReagentBrowseQuery()
+    if not self.ahScan or not self.ahScan.inProgress then
+        return
+    end
+    local entry = self.ahScan.filters[self.ahScan.index]
+    if not entry then
+        return
+    end
+    local filterSet = entry.filters
+    local query = {
+        searchString = "",
+        sorts = {},
+        filters = {},
+        itemClassFilters = filterSet,
+    }
+    if C_AuctionHouse.SendBrowseQuery then
+        C_AuctionHouse.SendBrowseQuery(query)
+    end
+    local progress = (self.ahScan.index - 1) / self.ahScan.total
+    if self.ShowScanProgress then
+        local label = entry.name or "Reagents"
+        self:ShowScanProgress(progress, string.format("Scanning AH: %s (%d/%d)", label, self.ahScan.index, self.ahScan.total))
+    end
+    self.ahScan.querySentAt = GetTime()
+    self.ahScan.lastResultAt = GetTime()
+end
+
+function FT:ProcessBrowseResults(results)
+    if type(results) ~= "table" then
+        return
+    end
+    if self.ahScan then
+        self.ahScan.lastResultAt = GetTime()
+    end
+    for _, info in ipairs(results) do
+        local itemKey = info.itemKey
+        local itemID = itemKey and itemKey.itemID
+        local minPrice = info.minPrice
+        local quantity = info.totalQuantity or 0
+        if itemID and minPrice and minPrice > 0 and quantity > 0 then
+            self:SetCachedPriceMin(itemID, minPrice)
+        end
+    end
+end
+
+function FT:AdvanceReagentScanIfDone()
+    if not self.ahScan or not self.ahScan.inProgress then
+        return
+    end
+    local now = GetTime()
+    local hasFull = C_AuctionHouse.HasFullBrowseResults and C_AuctionHouse.HasFullBrowseResults()
+    if not hasFull then
+        if C_AuctionHouse.RequestMoreBrowseResults then
+            local requested = C_AuctionHouse.RequestMoreBrowseResults()
+            if requested then
+                return
+            end
+        end
+        if self.ahScan.lastResultAt and (now - self.ahScan.lastResultAt) < 6 then
+            return
+        end
+    end
+
+    self.ahScan.index = self.ahScan.index + 1
+    if self.ahScan.index > self.ahScan.total then
+        self.ahScan.inProgress = false
+        self.ahScanReady = true
+        self:StopScanTicker()
+        if self.accountDb then
+            self.accountDb.ahScan = self.accountDb.ahScan or {}
+            self.accountDb.ahScan[self:GetRealmKey()] = self:GetServerTimestamp()
+        end
+        if self.ShowScanProgress then
+            self:ShowScanProgress(nil, "")
+        end
+        if self.UpdateRows then
+            self:UpdateRows(self.MODES.ALL)
+        end
+        if self.UpdateSummary then
+            self:UpdateSummary(self.MODES.ALL)
+        end
+        return
+    end
+    self:SendReagentBrowseQuery()
+end
+
+function FT:PollReagentScan()
+    if not self.ahScan or not self.ahScan.inProgress or not self.ahAvailable then
+        return
+    end
+    local results = C_AuctionHouse.GetBrowseResults and C_AuctionHouse.GetBrowseResults()
+    if type(results) == "table" and #results > 0 then
+        self:ProcessBrowseResults(results)
+    end
+    self:AdvanceReagentScanIfDone()
+end
+
+function FT:GetCommodityUnitPrice(itemID)
+    if not C_AuctionHouse then
+        return nil
+    end
+    local minPrice
+    if C_AuctionHouse.GetCommoditySearchResults then
+        local results = C_AuctionHouse.GetCommoditySearchResults(itemID)
+        if type(results) == "table" then
+            for _, info in ipairs(results) do
+                local price = info.unitPrice
+                if price and (not minPrice or price < minPrice) then
+                    minPrice = price
+                end
+            end
+        elseif type(results) == "number" and C_AuctionHouse.GetCommoditySearchResultInfo then
+            for i = 1, results do
+                local info = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
+                local price = info and info.unitPrice
+                if price and (not minPrice or price < minPrice) then
+                    minPrice = price
+                end
+            end
+        end
+    elseif C_AuctionHouse.GetCommoditySearchResultInfo and C_AuctionHouse.GetCommoditySearchResultsQuantity then
+        local count = C_AuctionHouse.GetCommoditySearchResultsQuantity(itemID) or 0
+        for i = 1, count do
+            local info = C_AuctionHouse.GetCommoditySearchResultInfo(itemID, i)
+            local price = info and info.unitPrice
+            if price and (not minPrice or price < minPrice) then
+                minPrice = price
+            end
+        end
+    end
+    return minPrice
+end
+
+function FT:GetItemUnitPrice(itemKey)
+    if not C_AuctionHouse or not itemKey then
+        return nil
+    end
+    local minPrice
+    if C_AuctionHouse.GetItemSearchResults then
+        local results = C_AuctionHouse.GetItemSearchResults(itemKey)
+        if type(results) == "table" then
+            for _, info in ipairs(results) do
+                local buyout = info.buyoutAmount
+                local stack = info.quantity or info.stackSize or 1
+                local unitPrice = buyout and stack and stack > 0 and math.floor(buyout / stack) or nil
+                if unitPrice and (not minPrice or unitPrice < minPrice) then
+                    minPrice = unitPrice
+                end
+            end
+        elseif type(results) == "number" and C_AuctionHouse.GetItemSearchResultInfo then
+            for i = 1, results do
+                local info = C_AuctionHouse.GetItemSearchResultInfo(itemKey, i)
+                local buyout = info and info.buyoutAmount
+                local stack = info and (info.quantity or info.stackSize) or 1
+                local unitPrice = buyout and stack and stack > 0 and math.floor(buyout / stack) or nil
+                if unitPrice and (not minPrice or unitPrice < minPrice) then
+                    minPrice = unitPrice
+                end
+            end
+        end
+    end
+    return minPrice
+end
+
+function FT:FormatMoney(copper)
+    if not copper then
+        return nil
+    end
+    local sign = ""
+    if copper < 0 then
+        sign = "-"
+        copper = math.abs(copper)
+    end
+    local gold = math.floor(copper / 10000)
+    local silver = math.floor((copper % 10000) / 100)
+    local cop = copper % 100
+    local parts = {}
+    if gold > 0 then
+        table.insert(parts, string.format("%dg", gold))
+    end
+    if silver > 0 or (gold > 0 and cop > 0) then
+        table.insert(parts, string.format("%ds", silver))
+    end
+    if cop > 0 or #parts == 0 then
+        table.insert(parts, string.format("%dc", cop))
+    end
+    return sign .. table.concat(parts, " ")
+end
+
+function FT:GetAllItemsTotalValue()
+    if not self.db or not self.db.allItems then
+        return nil
+    end
+    local total = 0
+    local hasValue = false
+    for _, item in ipairs(self.db.allItems) do
+        local unitPrice = self:GetCachedPrice(item.itemID)
+        if unitPrice then
+            total = total + (unitPrice * (tonumber(item.current) or 0))
+            hasValue = true
+        end
+    end
+    if not hasValue then
+        return nil
+    end
+    return total
+end
+
 function FT:IsValidItem(item)
     if not item then
         return false
@@ -914,6 +1486,19 @@ function FT:StartRun(mode)
             end
         end
     else
+        if not self.ahScanReady then
+            if self.ahAvailable then
+                if self.ahScan and self.ahScan.inProgress then
+                    self:Print("Auction House scan in progress. Please wait.")
+                else
+                    self:StartReagentScan()
+                    self:Print("Scanning Auction House reagents. Please wait.")
+                end
+            else
+                self:Print("Open the Auction House to scan reagents before starting.")
+            end
+            return
+        end
         state.baselineCounts = self:ScanBagCounts()
         self.db.allItems = {}
         state.lastScan = 0
@@ -1071,6 +1656,7 @@ function FT:RefreshProgress(mode)
                 local current = (currentCounts[itemID] or 0) - (baseline[itemID] or 0)
                 if current ~= 0 then
                     table.insert(newItems, { itemID = itemID, current = current })
+                    self:EnsurePrice(itemID)
                 end
             end
 
@@ -1239,6 +1825,7 @@ function FT:PLAYER_LOGIN()
     self:RegisterSlash()
     self:UpdateMinimapVisibility()
     self:UpdateTimer()
+    self.ahScanReady = false
 end
 
 function FT:BAG_UPDATE_DELAYED()
@@ -1255,6 +1842,83 @@ function FT:ITEM_DATA_LOAD_RESULT()
     end
 end
 
+function FT:AUCTION_HOUSE_SHOW()
+    self.ahAvailable = true
+    if not self.ahScanReady then
+        self:StartReagentScan()
+    end
+end
+
+function FT:AUCTION_HOUSE_CLOSED()
+    self.ahAvailable = false
+    if self.ahScan and self.ahScan.inProgress then
+        if self.ShowScanProgress then
+            self:ShowScanProgress(nil, "")
+        end
+        self.ahScan.inProgress = false
+    end
+    self:StopScanTicker()
+end
+
+function FT:COMMODITY_SEARCH_RESULTS_UPDATED(itemID)
+    local inflight = self.ahInFlight
+    if not inflight or not inflight.isCommodity then
+        return
+    end
+    if itemID and itemID ~= inflight.itemID then
+        return
+    end
+    local unitPrice = self:GetCommodityUnitPrice(inflight.itemID)
+    self:HandlePriceResult(inflight.itemID, unitPrice)
+end
+
+function FT:ITEM_SEARCH_RESULTS_UPDATED(itemKey)
+    local inflight = self.ahInFlight
+    if not inflight or inflight.isCommodity then
+        return
+    end
+    local keyItemID = itemKey and itemKey.itemID
+    if keyItemID and keyItemID ~= inflight.itemID then
+        return
+    end
+    local unitPrice = self:GetItemUnitPrice(inflight.itemKey)
+    self:HandlePriceResult(inflight.itemID, unitPrice)
+end
+
+function FT:AUCTION_HOUSE_BROWSE_RESULTS_UPDATED()
+    if not self.ahScan or not self.ahScan.inProgress then
+        return
+    end
+    local results = C_AuctionHouse.GetBrowseResults()
+    self:ProcessBrowseResults(results)
+    self:AdvanceReagentScanIfDone()
+end
+
+function FT:AUCTION_HOUSE_BROWSE_RESULTS_ADDED(...)
+    if not self.ahScan or not self.ahScan.inProgress then
+        return
+    end
+    local first = ...
+    if type(first) == "table" then
+        self:ProcessBrowseResults(first)
+    else
+        self:ProcessBrowseResults({ ... })
+    end
+    self:AdvanceReagentScanIfDone()
+end
+
+function FT:AUCTION_HOUSE_BROWSE_FAILURE()
+    if not self.ahScan or not self.ahScan.inProgress then
+        return
+    end
+    self.ahScan.inProgress = false
+    self:StopScanTicker()
+    if self.ShowScanProgress then
+        self:ShowScanProgress(nil, "")
+    end
+    self:Print("Auction House scan failed. Please try again.")
+end
+
 FT.eventFrame = CreateFrame("Frame")
 FT.eventFrame:SetScript("OnEvent", function(_, event, ...)
     if FT[event] then
@@ -1265,3 +1929,10 @@ FT.eventFrame:RegisterEvent("ADDON_LOADED")
 FT.eventFrame:RegisterEvent("PLAYER_LOGIN")
 FT.eventFrame:RegisterEvent("BAG_UPDATE_DELAYED")
 FT.eventFrame:RegisterEvent("ITEM_DATA_LOAD_RESULT")
+FT.eventFrame:RegisterEvent("AUCTION_HOUSE_SHOW")
+FT.eventFrame:RegisterEvent("AUCTION_HOUSE_CLOSED")
+FT.eventFrame:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
+FT.eventFrame:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
+FT.eventFrame:RegisterEvent("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+FT.eventFrame:RegisterEvent("AUCTION_HOUSE_BROWSE_RESULTS_ADDED")
+FT.eventFrame:RegisterEvent("AUCTION_HOUSE_BROWSE_FAILURE")

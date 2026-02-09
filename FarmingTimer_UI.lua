@@ -5,8 +5,10 @@ local ITEM_BUTTON_SIZE = 24
 local ITEM_ID_WIDTH = 150
 local TARGET_WIDTH = 60
 local CURRENT_WIDTH = 90
-local ALL_NAME_WIDTH = 220
-local ALL_COUNT_WIDTH = 90
+local ALL_NAME_WIDTH = 140
+local ALL_COUNT_WIDTH = 50
+local ALL_UNIT_WIDTH = 60
+local ALL_TOTAL_WIDTH = 70
 local FRAME_WIDTH = 460
 local FRAME_HEIGHT = 360
 local FRAME_MIN_HEIGHT = 300
@@ -538,8 +540,18 @@ function FT:CreateAllRow(index)
 
     row.countText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     row.countText:SetWidth(ALL_COUNT_WIDTH)
-    row.countText:SetJustifyH("LEFT")
+    row.countText:SetJustifyH("RIGHT")
     row.countText:SetPoint("LEFT", row.nameText, "RIGHT", 12, 0)
+
+    row.unitText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.unitText:SetWidth(ALL_UNIT_WIDTH)
+    row.unitText:SetJustifyH("RIGHT")
+    row.unitText:SetPoint("LEFT", row.countText, "RIGHT", 12, 0)
+
+    row.totalText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.totalText:SetWidth(ALL_TOTAL_WIDTH)
+    row.totalText:SetJustifyH("RIGHT")
+    row.totalText:SetPoint("LEFT", row.unitText, "RIGHT", 12, 0)
 
     self.allRows[index] = row
     return row
@@ -582,6 +594,10 @@ function FT:UpdateAllRow(row)
         row.itemButton.qualityText:SetText("")
         row.itemButton.qualityText:Hide()
         row.nameText:SetText("-")
+        row.unitText:SetText("-")
+        row.totalText:SetText("-")
+        row.unitText:SetTextColor(0.7, 0.7, 0.7)
+        row.totalText:SetTextColor(0.7, 0.7, 0.7)
     end
 
     local current = tonumber(row.data.current) or 0
@@ -592,6 +608,26 @@ function FT:UpdateAllRow(row)
         row.countText:SetTextColor(1.0, 0.2, 0.2)
     else
         row.countText:SetTextColor(1, 1, 1)
+    end
+
+    local unitPrice, auctionable = FT:GetCachedPrice(itemID)
+    if unitPrice then
+        row.unitText:SetText(FT:FormatMoney(unitPrice))
+        local total = unitPrice * current
+        row.totalText:SetText(FT:FormatMoney(total))
+        local color = current < 0 and { 1.0, 0.2, 0.2 } or { 0.2, 1.0, 0.2 }
+        row.totalText:SetTextColor(color[1], color[2], color[3])
+        row.unitText:SetTextColor(1, 1, 1)
+    else
+        if auctionable == false then
+            row.unitText:SetText("N/A")
+            row.totalText:SetText("N/A")
+        else
+            row.unitText:SetText("—")
+            row.totalText:SetText("—")
+        end
+        row.unitText:SetTextColor(0.7, 0.7, 0.7)
+        row.totalText:SetTextColor(0.7, 0.7, 0.7)
     end
 end
 
@@ -654,10 +690,19 @@ function FT:UpdateSummary(mode, completed, valid)
     mode = mode or self:GetActiveMode()
     if mode == self.MODES.ALL then
         local items = (self.db and self.db.allItems) or {}
+        if not FT.ahScanReady then
+            self.frame.statusText:SetText("Open Auction House to scan reagents")
+            return
+        end
         if #items == 0 then
             self.frame.statusText:SetText("No items collected")
         else
-            self.frame.statusText:SetText(string.format("Tracking %d items", #items))
+            local total = FT:GetAllItemsTotalValue()
+            if total then
+                self.frame.statusText:SetText(string.format("Tracking %d items | AH Total: %s", #items, FT:FormatMoney(total)))
+            else
+                self.frame.statusText:SetText(string.format("Tracking %d items", #items))
+            end
         end
         return
     end
@@ -777,6 +822,22 @@ function FT:UpdateControls(mode)
             setEditBoxEnabled(row.itemIDBox, not isLocked and not isRunning)
             setEditBoxEnabled(row.targetBox, not isLocked and not isRunning)
         end
+    end
+end
+
+function FT:ShowScanProgress(progress, text)
+    if not self.frame or not self.frame.scanBar then
+        return
+    end
+    if progress == nil then
+        self.frame.scanBar:Hide()
+        self.frame.scanText:SetText("")
+        return
+    end
+    self.frame.scanBar:Show()
+    self.frame.scanBar:SetValue(math.max(0, math.min(1, progress)))
+    if text then
+        self.frame.scanText:SetText(text)
     end
 end
 
@@ -924,6 +985,27 @@ function FT:InitUI()
     frame.statusText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     frame.statusText:SetPoint("TOP", frame.timerText, "BOTTOM", 0, -6)
     frame.statusText:SetText("No items configured")
+
+    local scanBar = CreateFrame("StatusBar", nil, frame)
+    scanBar:SetSize(240, 12)
+    scanBar:SetPoint("TOP", frame.statusText, "BOTTOM", 0, -6)
+    scanBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    scanBar:GetStatusBarTexture():SetHorizTile(false)
+    scanBar:GetStatusBarTexture():SetVertTile(false)
+    scanBar:SetMinMaxValues(0, 1)
+    scanBar:SetValue(0)
+    scanBar:Hide()
+
+    local scanBg = scanBar:CreateTexture(nil, "BACKGROUND")
+    scanBg:SetAllPoints(true)
+    scanBg:SetColorTexture(0, 0, 0, 0.5)
+
+    local scanText = scanBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    scanText:SetPoint("CENTER", scanBar, "CENTER", 0, 0)
+    scanText:SetText("")
+
+    frame.scanBar = scanBar
+    frame.scanText = scanText
 
     local farmingContent = CreateFrame("Frame", nil, frame)
     farmingContent:SetAllPoints(frame)
@@ -1122,6 +1204,14 @@ function FT:InitUI()
     local allHeaderCount = allHeader:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     allHeaderCount:SetPoint("LEFT", allHeader, "LEFT", 2 + ITEM_BUTTON_SIZE + 8 + ALL_NAME_WIDTH + 12, 0)
     allHeaderCount:SetText("Count")
+
+    local allHeaderUnit = allHeader:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    allHeaderUnit:SetPoint("LEFT", allHeader, "LEFT", 2 + ITEM_BUTTON_SIZE + 8 + ALL_NAME_WIDTH + 12 + ALL_COUNT_WIDTH + 12, 0)
+    allHeaderUnit:SetText("Unit")
+
+    local allHeaderTotal = allHeader:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    allHeaderTotal:SetPoint("LEFT", allHeader, "LEFT", 2 + ITEM_BUTTON_SIZE + 8 + ALL_NAME_WIDTH + 12 + ALL_COUNT_WIDTH + 12 + ALL_UNIT_WIDTH + 12, 0)
+    allHeaderTotal:SetText("Total")
 
     local allScrollFrame = CreateFrame("ScrollFrame", nil, allItemsContent, "UIPanelScrollFrameTemplate")
     allScrollFrame:SetPoint("TOPLEFT", 18, -106)
