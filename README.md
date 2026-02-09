@@ -7,6 +7,7 @@ A simple WoW addon that tracks your farming time and stops automatically when al
 - Set items via drag and drop from your bags or by ItemID/Item Link.
 - Define target amounts per item.
 - Start / Pause / Resume / Stop / Reset.
+- Two modes with tabs: **Targets** (configured list) and **All Items** (auto-detect).
 - Auto-stop with a success sound when all targets are met.
 - Movable main window plus Options panel.
 - Main window height is resizable (drag the bottom-right handle).
@@ -26,6 +27,10 @@ A simple WoW addon that tracks your farming time and stops automatically when al
 3. Drag an item into the slot or paste an ItemID/Link into **ItemID / Link**.
 4. Enter the target amount in **Target**.
 5. Press **Start** and begin farming.
+
+## Modes
+- **Targets**: configure items + targets, optional auto-stop when all targets are met.
+- **All Items**: tracks every item you collect while the mode is running (net change since start). No manual item setup required.
 
 ## Main Window Controls
 - **Add Item**: adds a new row.
@@ -52,6 +57,7 @@ A simple WoW addon that tracks your farming time and stops automatically when al
   `current bag count - start count`
 - If you consume/turn in items during the run, progress can go down.
 - Only items in your bags are counted (no bank).
+- In **All Items** mode, the collected list remains visible after **Stop** and clears on **Reset**.
 
 ## Options (Interface -> AddOns -> FarmingTimer)
 - **Open FarmingTimer**: opens the main window.
@@ -67,7 +73,7 @@ A simple WoW addon that tracks your farming time and stops automatically when al
 The item may not be cached yet. Wait a moment or open its tooltip so WoW can load the item data.
 
 **Why is progress 0 after Stop?**
-Stop ends the run. Starting again creates a new baseline.
+In **Targets** mode, Stop ends the run and progress resets. Starting again creates a new baseline.
 
 ## Feedback
 Suggestions or bugs are welcome.

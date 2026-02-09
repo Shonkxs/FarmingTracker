@@ -4,9 +4,16 @@ _G.FarmingTimer = FT
 
 FT.addonName = ADDON_NAME
 
+FT.MODES = {
+    TARGETS = "targets",
+    ALL = "all",
+}
+
 local DEFAULTS = {
-    version = 1,
+    version = 2,
     items = {},
+    allItems = {},
+    activeMode = "targets",
     frame = { point = "CENTER", x = 0, y = 0, height = 360 },
     visible = true,
     minimap = { hide = false, minimapPos = 220 },
@@ -36,6 +43,78 @@ function FT:InitDB()
     self.db = FarmingTimerDB
     self.accountDb = FarmingTimerAccountDB
     self.accountDb.presets = self.accountDb.presets or {}
+    self:GetActiveMode()
+end
+
+function FT:GetActiveMode()
+    if not self.db then
+        return self.MODES.TARGETS
+    end
+    local mode = self.db.activeMode
+    if mode ~= self.MODES.ALL then
+        mode = self.MODES.TARGETS
+    end
+    self.db.activeMode = mode
+    return mode
+end
+
+function FT:SetActiveMode(mode)
+    if not self.db then
+        return
+    end
+    if mode ~= self.MODES.ALL then
+        mode = self.MODES.TARGETS
+    end
+    self.db.activeMode = mode
+end
+
+function FT:GetModeState(mode)
+    if not mode then
+        mode = self:GetActiveMode()
+    end
+    self.modeStates = self.modeStates or {}
+    local state = self.modeStates[mode]
+    if not state then
+        state = {
+            running = false,
+            paused = false,
+            startTime = nil,
+            elapsed = 0,
+            baseline = {},
+            baselineCounts = {},
+        }
+        self.modeStates[mode] = state
+    end
+    state.elapsed = state.elapsed or 0
+    state.baseline = state.baseline or {}
+    state.baselineCounts = state.baselineCounts or {}
+    return state
+end
+
+function FT:GetRunningMode()
+    for _, mode in pairs(self.MODES) do
+        local state = self:GetModeState(mode)
+        if state.running then
+            return mode
+        end
+    end
+    return nil
+end
+
+function FT:IsAnyRunning()
+    return self:GetRunningMode() ~= nil
+end
+
+function FT:GetItemsForMode(mode)
+    if not self.db then
+        return {}
+    end
+    if mode == self.MODES.ALL then
+        self.db.allItems = self.db.allItems or {}
+        return self.db.allItems
+    end
+    self.db.items = self.db.items or {}
+    return self.db.items
 end
 
 function FT:NormalizePresetName(name)
@@ -447,7 +526,7 @@ end
 function FT:SetSelectedPreset(name)
     self.selectedPreset = name
     if self.frame and self.frame.presetDropdown then
-        if name and self.accountDb.presets[name] then
+        if name then
             UIDropDownMenu_SetSelectedValue(self.frame.presetDropdown, name)
             UIDropDownMenu_SetText(self.frame.presetDropdown, name)
         else
@@ -461,7 +540,7 @@ function FT:SetSelectedPreset(name)
 end
 
 function FT:SavePreset(name)
-    if self.running then
+    if self:IsAnyRunning() then
         self:Print("Stop the timer before saving a preset.")
         return
     end
@@ -495,7 +574,7 @@ function FT:SavePreset(name)
 end
 
 function FT:LoadPreset(name)
-    if self.running then
+    if self:IsAnyRunning() then
         self:Print("Stop the timer before loading a preset.")
         return
     end
@@ -526,24 +605,28 @@ function FT:LoadPreset(name)
 
     self.db.items = items
     self.db.lastPreset = name
-    self.baseline = {}
+    local state = self:GetModeState(self.MODES.TARGETS)
+    state.running = false
+    state.paused = false
+    state.startTime = nil
+    state.elapsed = 0
+    state.baseline = {}
     for _, item in ipairs(self.db.items) do
         item.current = 0
         item._baseline = 0
     end
-    self.elapsed = 0
 
-    self:RefreshList()
+    self:RefreshList(self.MODES.TARGETS)
     if self.UpdateControls then
         self:UpdateControls()
     end
-    self:UpdateTimer()
+    self:UpdateTimer(self.MODES.TARGETS)
     self:SetSelectedPreset(name)
     self:Print("Preset loaded: " .. name)
 end
 
 function FT:DeletePreset(name)
-    if self.running then
+    if self:IsAnyRunning() then
         self:Print("Stop the timer before deleting a preset.")
         return
     end
@@ -664,6 +747,43 @@ function FT:FormatElapsed(seconds)
     return string.format("%02d:%02d", m, s)
 end
 
+function FT:ScanBagCounts()
+    local counts = {}
+    if not C_Container or not C_Container.GetContainerNumSlots then
+        return counts
+    end
+    local maxBag = NUM_BAG_SLOTS or 0
+    for bag = 0, maxBag do
+        local numSlots = C_Container.GetContainerNumSlots(bag)
+        if numSlots and numSlots > 0 then
+            for slot = 1, numSlots do
+                local itemID = C_Container.GetContainerItemID(bag, slot)
+                if itemID then
+                    local info = C_Container.GetContainerItemInfo(bag, slot)
+                    local stack = (info and info.stackCount) or 1
+                    counts[itemID] = (counts[itemID] or 0) + stack
+                end
+            end
+        end
+    end
+
+    local reagentBag = _G and _G.REAGENTBAG_CONTAINER
+    if reagentBag and reagentBag > maxBag then
+        local numSlots = C_Container.GetContainerNumSlots(reagentBag)
+        if numSlots and numSlots > 0 then
+            for slot = 1, numSlots do
+                local itemID = C_Container.GetContainerItemID(reagentBag, slot)
+                if itemID then
+                    local info = C_Container.GetContainerItemInfo(reagentBag, slot)
+                    local stack = (info and info.stackCount) or 1
+                    counts[itemID] = (counts[itemID] or 0) + stack
+                end
+            end
+        end
+    end
+    return counts
+end
+
 function FT:IsValidItem(item)
     if not item then
         return false
@@ -734,122 +854,150 @@ function FT:GetTrackableCount()
     return count
 end
 
-function FT:StartRun()
-    if self.running and not self.paused then
-        return
-    end
-    if self.running and self.paused then
-        self:ResumeRun()
+function FT:StartRun(mode)
+    mode = mode or self:GetActiveMode()
+    local runningMode = self:GetRunningMode()
+    if runningMode and runningMode ~= mode then
+        self:Print("Stop the other mode before starting this one.")
         return
     end
 
-    local considerTargets = self.db.considerTargets ~= false
-    if considerTargets then
-        if self:GetValidCount() == 0 then
-            self:Print("Please add at least one item with a target amount.")
-            return
+    local state = self:GetModeState(mode)
+    if state.running and not state.paused then
+        return
+    end
+    if state.running and state.paused then
+        self:ResumeRun(mode)
+        return
+    end
+
+    if mode == self.MODES.TARGETS then
+        local considerTargets = self.db.considerTargets ~= false
+        if considerTargets then
+            if self:GetValidCount() == 0 then
+                self:Print("Please add at least one item with a target amount.")
+                return
+            end
+        else
+            if self:GetTrackableCount() == 0 then
+                self:Print("Please add at least one item to track.")
+                return
+            end
+        end
+
+        state.baseline = {}
+        for i, item in ipairs(self.db.items) do
+            item._sortIndex = i
+            item._baseline = 0
+            if self:IsTrackableItem(item) then
+                local itemID = self:GetItemIDFromItem(item)
+                local count = GetItemCount(itemID, false)
+                item._baseline = count
+                state.baseline[i] = count
+            else
+                state.baseline[i] = 0
+            end
         end
     else
-        if self:GetTrackableCount() == 0 then
-            self:Print("Please add at least one item to track.")
-            return
-        end
+        state.baselineCounts = self:ScanBagCounts()
+        self.db.allItems = {}
     end
 
-    self.baseline = {}
-    for i, item in ipairs(self.db.items) do
-        item._sortIndex = i
-        item._baseline = 0
-        if self:IsTrackableItem(item) then
-            local itemID = self:GetItemIDFromItem(item)
-            local count = GetItemCount(itemID, false)
-            item._baseline = count
-            self.baseline[i] = count
-        else
-            self.baseline[i] = 0
-        end
-    end
-
-    self.running = true
-    self.paused = false
-    self.startTime = GetTime()
-    self.elapsed = 0
+    self:SetActiveMode(mode)
+    state.running = true
+    state.paused = false
+    state.startTime = GetTime()
+    state.elapsed = 0
 
     self:StartTicker()
-    self:RefreshProgress()
+    self:RefreshProgress(mode)
     if self.UpdateControls then
         self:UpdateControls()
     end
 end
 
-function FT:PauseRun()
-    if not self.running or self.paused then
+function FT:PauseRun(mode)
+    mode = mode or self:GetActiveMode()
+    local state = self:GetModeState(mode)
+    if not state.running or state.paused then
         return
     end
-    if self.startTime then
-        self.elapsed = (self.elapsed or 0) + (GetTime() - self.startTime)
+    if state.startTime then
+        state.elapsed = (state.elapsed or 0) + (GetTime() - state.startTime)
     end
-    self.startTime = nil
-    self.paused = true
+    state.startTime = nil
+    state.paused = true
     self:StopTicker()
-    self:UpdateTimer()
+    self:UpdateTimer(mode)
     if self.UpdateControls then
         self:UpdateControls()
     end
 end
 
-function FT:ResumeRun()
-    if not self.running or not self.paused then
+function FT:ResumeRun(mode)
+    mode = mode or self:GetActiveMode()
+    local state = self:GetModeState(mode)
+    if not state.running or not state.paused then
         return
     end
-    self.paused = false
-    self.startTime = GetTime()
+    state.paused = false
+    state.startTime = GetTime()
     self:StartTicker()
-    self:UpdateTimer()
+    self:UpdateTimer(mode)
     if self.UpdateControls then
         self:UpdateControls()
     end
 end
 
-function FT:StopRun()
-    if not self.running then
+function FT:StopRun(mode)
+    mode = mode or self:GetActiveMode()
+    local state = self:GetModeState(mode)
+    if not state.running then
         return
     end
 
-    if self.startTime then
-        self.elapsed = (self.elapsed or 0) + (GetTime() - self.startTime)
+    if state.startTime then
+        state.elapsed = (state.elapsed or 0) + (GetTime() - state.startTime)
     end
 
-    self.running = false
-    self.paused = false
-    self.startTime = nil
+    state.running = false
+    state.paused = false
+    state.startTime = nil
     self:StopTicker()
-    self:UpdateTimer()
+    self:UpdateTimer(mode)
 
     if self.UpdateControls then
         self:UpdateControls()
     end
 end
 
-function FT:ResetRun()
-    self:StopRun()
-    self.elapsed = 0
-    self.paused = false
-    self.baseline = {}
-    for _, item in ipairs(self.db.items) do
-        item.current = 0
-        item._baseline = 0
+function FT:ResetRun(mode)
+    mode = mode or self:GetActiveMode()
+    local state = self:GetModeState(mode)
+    self:StopRun(mode)
+    state.elapsed = 0
+    state.paused = false
+    state.baseline = {}
+    state.baselineCounts = {}
+    if mode == self.MODES.TARGETS then
+        for _, item in ipairs(self.db.items) do
+            item.current = 0
+            item._baseline = 0
+        end
+    else
+        self.db.allItems = {}
     end
-    self:RefreshProgress()
+    self:RefreshProgress(mode)
+    self:UpdateTimer(mode)
 end
 
-function FT:CompleteRun()
+function FT:CompleteRun(mode)
     if SOUNDKIT and SOUNDKIT.IG_QUEST_LIST_COMPLETE then
         PlaySound(SOUNDKIT.IG_QUEST_LIST_COMPLETE)
     else
         PlaySound(12867)
     end
-    self:StopRun()
+    self:StopRun(mode)
 end
 
 function FT:StartTicker()
@@ -866,17 +1014,62 @@ function FT:StopTicker()
     end
 end
 
-function FT:UpdateTimer()
-    local elapsed = self.elapsed or 0
-    if self.running and self.startTime then
-        elapsed = elapsed + (GetTime() - self.startTime)
+function FT:UpdateTimer(mode)
+    mode = mode or self:GetActiveMode()
+    local state = self:GetModeState(mode)
+    local elapsed = state.elapsed or 0
+    if state.running and state.startTime then
+        elapsed = elapsed + (GetTime() - state.startTime)
     end
     if self.SetTimerText then
         self:SetTimerText(self:FormatElapsed(elapsed))
     end
 end
 
-function FT:RefreshProgress()
+function FT:RefreshProgress(mode)
+    mode = mode or self:GetActiveMode()
+
+    if mode == self.MODES.ALL then
+        local state = self:GetModeState(mode)
+        if state.running then
+            local currentCounts = self:ScanBagCounts()
+            local baseline = state.baselineCounts or {}
+            local union = {}
+            for itemID in pairs(baseline) do
+                union[itemID] = true
+            end
+            for itemID in pairs(currentCounts) do
+                union[itemID] = true
+            end
+
+            local newItems = {}
+            for itemID in pairs(union) do
+                local current = (currentCounts[itemID] or 0) - (baseline[itemID] or 0)
+                if current ~= 0 then
+                    table.insert(newItems, { itemID = itemID, current = current })
+                end
+            end
+
+            table.sort(newItems, function(a, b)
+                if a.current ~= b.current then
+                    return a.current > b.current
+                end
+                return (a.itemID or 0) < (b.itemID or 0)
+            end)
+
+            self.db.allItems = newItems
+        end
+
+        if self.UpdateRows then
+            self:UpdateRows(mode)
+        end
+        if self.UpdateSummary then
+            self:UpdateSummary(mode)
+        end
+        return
+    end
+
+    local state = self:GetModeState(mode)
     local completed = 0
     local targetable = 0
     local trackable = 0
@@ -887,8 +1080,8 @@ function FT:RefreshProgress()
         if self:IsTrackableItem(item) then
             trackable = trackable + 1
             local itemID = self:GetItemIDFromItem(item)
-            local base = item._baseline or (self.baseline and self.baseline[i]) or 0
-            if self.running then
+            local base = item._baseline or (state.baseline and state.baseline[i]) or 0
+            if state.running then
                 current = GetItemCount(itemID, false) - base
             else
                 current = 0
@@ -904,23 +1097,23 @@ function FT:RefreshProgress()
         item.current = current
     end
 
-    if self.running and not self.paused then
+    if state.running and not state.paused then
         self:SortItemsByProgress()
     end
 
     if self.UpdateRows then
-        self:UpdateRows()
+        self:UpdateRows(mode)
     end
     if self.UpdateSummary then
         if considerTargets then
-            self:UpdateSummary(completed, targetable)
+            self:UpdateSummary(mode, completed, targetable)
         else
-            self:UpdateSummary(0, trackable)
+            self:UpdateSummary(mode, 0, trackable)
         end
     end
 
-    if self.running and not self.paused and considerTargets and targetable > 0 and completed == targetable then
-        self:CompleteRun()
+    if state.running and not state.paused and considerTargets and targetable > 0 and completed == targetable then
+        self:CompleteRun(mode)
     end
 end
 
@@ -1025,14 +1218,16 @@ function FT:PLAYER_LOGIN()
 end
 
 function FT:BAG_UPDATE_DELAYED()
-    if self.running then
-        self:RefreshProgress()
+    local runningMode = self:GetRunningMode()
+    if runningMode then
+        self:RefreshProgress(runningMode)
     end
 end
 
 function FT:ITEM_DATA_LOAD_RESULT()
     if self.UpdateRows then
-        self:UpdateRows()
+        self:UpdateRows(self.MODES.TARGETS)
+        self:UpdateRows(self.MODES.ALL)
     end
 end
 

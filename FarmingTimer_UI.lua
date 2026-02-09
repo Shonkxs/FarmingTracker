@@ -5,6 +5,8 @@ local ITEM_BUTTON_SIZE = 24
 local ITEM_ID_WIDTH = 150
 local TARGET_WIDTH = 60
 local CURRENT_WIDTH = 90
+local ALL_NAME_WIDTH = 220
+local ALL_COUNT_WIDTH = 90
 local FRAME_WIDTH = 460
 local FRAME_HEIGHT = 360
 local FRAME_MIN_HEIGHT = 300
@@ -274,7 +276,7 @@ function FT:SetRowItem(row, itemID)
     row.itemIDBox:SetText(itemID and tostring(itemID) or "")
     self:RequestItemData(itemID)
     self:UpdateRow(row)
-    self:RefreshProgress()
+    self:RefreshProgress(self.MODES.TARGETS)
 end
 
 function FT:CommitItemID(row)
@@ -289,7 +291,7 @@ function FT:CommitItemID(row)
         row.itemIDBox:SetText("")
     end
     self:UpdateRow(row)
-    self:RefreshProgress()
+    self:RefreshProgress(self.MODES.TARGETS)
 end
 
 function FT:CommitTarget(row)
@@ -303,11 +305,11 @@ function FT:CommitTarget(row)
         row.targetBox:SetText("")
     end
     self:UpdateRow(row)
-    self:RefreshProgress()
+    self:RefreshProgress(self.MODES.TARGETS)
 end
 
 function FT:HandleItemCursor(row)
-    if self.running then
+    if self:IsAnyRunning() then
         return
     end
     local infoType, itemID, itemLink = GetCursorInfo()
@@ -410,11 +412,11 @@ function FT:CreateRow(index)
     row.removeButton:SetPoint("RIGHT", row, "RIGHT", -4, 0)
     row.removeButton:SetText("X")
     row.removeButton:SetScript("OnClick", function()
-        if FT.running then
+        if FT:IsAnyRunning() then
             return
         end
         table.remove(FT.db.items, row.index)
-        FT:RefreshList()
+        FT:RefreshList(FT.MODES.TARGETS)
     end)
 
     self.rows[index] = row
@@ -487,7 +489,142 @@ function FT:UpdateRow(row)
     end
 end
 
-function FT:UpdateRows()
+function FT:CreateAllRow(index)
+    local row = CreateFrame("Frame", nil, self.allListContent)
+    row:SetHeight(ROW_HEIGHT)
+    positionRow(row, index)
+
+    row.itemButton = CreateFrame("Button", nil, row, "BackdropTemplate")
+    row.itemButton:SetSize(ITEM_BUTTON_SIZE, ITEM_BUTTON_SIZE)
+    row.itemButton:SetPoint("LEFT", 2, 0)
+    row.itemButton:SetBackdrop({
+        bgFile = "Interface\\Buttons\\UI-Quickslot2",
+        edgeFile = "Interface\\Buttons\\UI-Quickslot2",
+        tile = false,
+        edgeSize = 16,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+
+    row.itemButton.icon = row.itemButton:CreateTexture(nil, "ARTWORK")
+    row.itemButton.icon:SetAllPoints()
+    row.itemButton.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    row.itemButton.qualityText = row.itemButton:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.itemButton.qualityText:SetPoint("BOTTOMRIGHT", -2, 2)
+    row.itemButton.qualityText:SetJustifyH("RIGHT")
+    row.itemButton.qualityText:Hide()
+
+    row.itemButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if row.data and row.data.itemID then
+            if GameTooltip.SetItemByID then
+                GameTooltip:SetItemByID(row.data.itemID)
+            else
+                GameTooltip:SetHyperlink("item:" .. row.data.itemID)
+            end
+        else
+            GameTooltip:AddLine("Item data not available")
+        end
+        GameTooltip:Show()
+    end)
+    row.itemButton:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+
+    row.nameText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.nameText:SetWidth(ALL_NAME_WIDTH)
+    row.nameText:SetJustifyH("LEFT")
+    row.nameText:SetPoint("LEFT", row.itemButton, "RIGHT", 8, 0)
+
+    row.countText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.countText:SetWidth(ALL_COUNT_WIDTH)
+    row.countText:SetJustifyH("LEFT")
+    row.countText:SetPoint("LEFT", row.nameText, "RIGHT", 12, 0)
+
+    self.allRows[index] = row
+    return row
+end
+
+function FT:UpdateAllRow(row)
+    if not row or not row.data then
+        return
+    end
+
+    local itemID = row.data.itemID
+    if itemID then
+        local name, _, _, _, _, _, _, _, _, icon = GetItemInfo(itemID)
+        if icon then
+            row.itemButton.icon:SetTexture(icon)
+            row.itemButton.icon:SetDesaturated(false)
+        else
+            row.itemButton.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+            row.itemButton.icon:SetDesaturated(false)
+            self:RequestItemData(itemID)
+        end
+
+        if row.itemButton.qualityText then
+            local tier = FT.GetQualityTier and FT:GetQualityTier(itemID) or nil
+            if tier and tier > 0 then
+                row.itemButton.qualityText:SetText(FT:GetQualityTierLabel(tier))
+                local r, g, b = FT:GetQualityTierColor(tier)
+                row.itemButton.qualityText:SetTextColor(r, g, b)
+                row.itemButton.qualityText:Show()
+            else
+                row.itemButton.qualityText:SetText("")
+                row.itemButton.qualityText:Hide()
+            end
+        end
+
+        row.nameText:SetText(name or ("Item " .. itemID))
+    else
+        row.itemButton.icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+        row.itemButton.icon:SetDesaturated(true)
+        row.itemButton.qualityText:SetText("")
+        row.itemButton.qualityText:Hide()
+        row.nameText:SetText("-")
+    end
+
+    local current = tonumber(row.data.current) or 0
+    row.countText:SetText(string.format("%d", current))
+    if current > 0 then
+        row.countText:SetTextColor(0.2, 1.0, 0.2)
+    elseif current < 0 then
+        row.countText:SetTextColor(1.0, 0.2, 0.2)
+    else
+        row.countText:SetTextColor(1, 1, 1)
+    end
+end
+
+function FT:UpdateAllRows()
+    if not self.db or not self.allListContent then
+        return
+    end
+
+    local items = self.db.allItems or {}
+    for i, item in ipairs(items) do
+        local row = self.allRows[i] or self:CreateAllRow(i)
+        row.index = i
+        row.data = item
+        positionRow(row, i)
+        row:Show()
+        self:UpdateAllRow(row)
+    end
+
+    for i = #items + 1, #self.allRows do
+        self.allRows[i]:Hide()
+    end
+
+    local height = math.max(1, #items * ROW_HEIGHT)
+    self.allListContent:SetHeight(height)
+end
+
+function FT:UpdateRows(mode)
+    mode = mode or self:GetActiveMode()
+    if mode == self.MODES.ALL then
+        self:UpdateAllRows()
+        return
+    end
+
     if not self.db or not self.listContent then
         return
     end
@@ -510,10 +647,23 @@ function FT:UpdateRows()
     self.listContent:SetHeight(height)
 end
 
-function FT:UpdateSummary(completed, valid)
+function FT:UpdateSummary(mode, completed, valid)
     if not self.frame or not self.frame.statusText then
         return
     end
+    mode = mode or self:GetActiveMode()
+    if mode == self.MODES.ALL then
+        local items = (self.db and self.db.allItems) or {}
+        if #items == 0 then
+            self.frame.statusText:SetText("No items collected")
+        else
+            self.frame.statusText:SetText(string.format("Tracking %d items", #items))
+        end
+        return
+    end
+
+    completed = tonumber(completed) or 0
+    valid = tonumber(valid) or 0
     local considerTargets = self.db and self.db.considerTargets ~= false
     if valid == 0 then
         if considerTargets then
@@ -530,87 +680,154 @@ function FT:UpdateSummary(completed, valid)
     end
 end
 
-function FT:UpdateControls()
+function FT:UpdateControls(mode)
     if not self.frame then
         return
     end
 
-    local isRunning = self.running
-    local isPaused = self.paused
-
-    if isPaused then
-        self.frame.startButton:SetText("Resume")
-    else
-        self.frame.startButton:SetText("Start")
-    end
-
-    self.frame.startButton:SetEnabled(not isRunning or isPaused)
-    self.frame.pauseButton:SetEnabled(isRunning and not isPaused)
-    self.frame.stopButton:SetEnabled(isRunning)
-    self.frame.resetButton:SetEnabled(not isRunning)
-    self.frame.addButton:SetEnabled(not isRunning)
-
-    if self.frame.presetDropdown then
-        if isRunning then
-            UIDropDownMenu_DisableDropDown(self.frame.presetDropdown)
-        else
-            UIDropDownMenu_EnableDropDown(self.frame.presetDropdown)
+    if not mode then
+        self:UpdateControls(self.MODES.TARGETS)
+        self:UpdateControls(self.MODES.ALL)
+        if self.UpdateTabs then
+            self:UpdateTabs()
         end
+        return
     end
-    if self.frame.presetNameBox then
-        setEditBoxEnabled(self.frame.presetNameBox, not isRunning)
+
+    local runningMode = self:GetRunningMode()
+    local state = self:GetModeState(mode)
+    local isRunning = state.running
+    local isPaused = state.paused
+    local isLocked = runningMode and runningMode ~= mode
+
+    local content = (mode == self.MODES.ALL) and self.frame.allItemsContent or self.frame.targetsContent
+    if not content then
+        return
     end
-    if self.frame.presetSaveButton then
-        self.frame.presetSaveButton:SetEnabled(not isRunning)
+
+    if content.startButton then
+        content.startButton:SetText(isPaused and "Resume" or "Start")
+        content.startButton:SetEnabled(not isLocked and (not isRunning or isPaused))
     end
-    if self.frame.presetLoadButton then
-        self.frame.presetLoadButton:SetEnabled(not isRunning)
+    if content.pauseButton then
+        content.pauseButton:SetEnabled(not isLocked and isRunning and not isPaused)
     end
-    if self.frame.presetDeleteButton then
-        self.frame.presetDeleteButton:SetEnabled(not isRunning)
+    if content.stopButton then
+        content.stopButton:SetEnabled(not isLocked and isRunning)
     end
-    if self.frame.targetCheck then
-        self.frame.targetCheck:SetEnabled(not isRunning)
-        if self.frame.targetCheckLabel then
-            if isRunning then
-                self.frame.targetCheckLabel:SetTextColor(0.6, 0.6, 0.6)
+    if content.resetButton then
+        content.resetButton:SetEnabled(not isLocked and not isRunning)
+    end
+
+    if mode == self.MODES.TARGETS then
+        if content.addButton then
+            content.addButton:SetEnabled(not isLocked and not isRunning)
+        end
+
+        if content.presetDropdown then
+            if isLocked or isRunning then
+                UIDropDownMenu_DisableDropDown(content.presetDropdown)
             else
-                self.frame.targetCheckLabel:SetTextColor(1, 1, 1)
+                UIDropDownMenu_EnableDropDown(content.presetDropdown)
             end
         end
-    end
-    if self.frame.profilesButton then
-        self.frame.profilesButton:SetEnabled(not isRunning)
-    end
-    if self.profilesFrame then
-        if self.profilesFrame.exportAllButton then
-            self.profilesFrame.exportAllButton:SetEnabled(not isRunning)
+        if content.presetNameBox then
+            setEditBoxEnabled(content.presetNameBox, not isLocked and not isRunning)
         end
-        if self.profilesFrame.exportSelectedButton then
-            self.profilesFrame.exportSelectedButton:SetEnabled(not isRunning)
+        if content.presetSaveButton then
+            content.presetSaveButton:SetEnabled(not isLocked and not isRunning)
         end
-        if self.profilesFrame.importButton then
-            self.profilesFrame.importButton:SetEnabled(not isRunning)
+        if content.presetLoadButton then
+            content.presetLoadButton:SetEnabled(not isLocked and not isRunning)
         end
-        if self.profilesFrame.mergeCheck then
-            self.profilesFrame.mergeCheck:SetEnabled(not isRunning)
+        if content.presetDeleteButton then
+            content.presetDeleteButton:SetEnabled(not isLocked and not isRunning)
         end
-    end
+        if content.targetCheck then
+            content.targetCheck:SetEnabled(not isLocked and not isRunning)
+            if content.targetCheckLabel then
+                if isLocked or isRunning then
+                    content.targetCheckLabel:SetTextColor(0.6, 0.6, 0.6)
+                else
+                    content.targetCheckLabel:SetTextColor(1, 1, 1)
+                end
+            end
+        end
+        if content.profilesButton then
+            content.profilesButton:SetEnabled(not isLocked and not isRunning)
+        end
+        if self.profilesFrame then
+            if self.profilesFrame.exportAllButton then
+                self.profilesFrame.exportAllButton:SetEnabled(not isLocked and not isRunning)
+            end
+            if self.profilesFrame.exportSelectedButton then
+                self.profilesFrame.exportSelectedButton:SetEnabled(not isLocked and not isRunning)
+            end
+            if self.profilesFrame.importButton then
+                self.profilesFrame.importButton:SetEnabled(not isLocked and not isRunning)
+            end
+            if self.profilesFrame.mergeCheck then
+                self.profilesFrame.mergeCheck:SetEnabled(not isLocked and not isRunning)
+            end
+        end
 
-    for _, row in ipairs(self.rows) do
-        row.itemButton:SetEnabled(not isRunning)
-        row.removeButton:SetEnabled(not isRunning)
-        setEditBoxEnabled(row.itemIDBox, not isRunning)
-        setEditBoxEnabled(row.targetBox, not isRunning)
+        for _, row in ipairs(self.rows) do
+            row.itemButton:SetEnabled(not isLocked and not isRunning)
+            row.removeButton:SetEnabled(not isLocked and not isRunning)
+            setEditBoxEnabled(row.itemIDBox, not isLocked and not isRunning)
+            setEditBoxEnabled(row.targetBox, not isLocked and not isRunning)
+        end
     end
 end
 
-function FT:RefreshList()
+function FT:UpdateTabs()
+    if not self.frame or not self.frame.tabs then
+        return
+    end
+    local runningMode = self:GetRunningMode()
+    for _, tab in ipairs(self.frame.tabs) do
+        if runningMode and runningMode ~= tab.mode then
+            tab:SetEnabled(false)
+        else
+            tab:SetEnabled(true)
+        end
+    end
+    local active = self:GetActiveMode()
+    local activeId = active == self.MODES.ALL and 2 or 1
+    PanelTemplates_SetTab(self.frame, activeId)
+end
+
+function FT:ActivateMode(mode)
+    local runningMode = self:GetRunningMode()
+    if runningMode and runningMode ~= mode then
+        self:Print("Stop the other mode before switching tabs.")
+        return
+    end
+    self:SetActiveMode(mode)
+    mode = self:GetActiveMode()
+    if self.frame and self.frame.targetsContent then
+        self.frame.targetsContent:SetShown(mode == self.MODES.TARGETS)
+    end
+    if self.frame and self.frame.allItemsContent then
+        self.frame.allItemsContent:SetShown(mode == self.MODES.ALL)
+    end
+    self:UpdateTabs()
+    self:RefreshProgress(mode)
+    self:UpdateTimer(mode)
+    self:UpdateControls()
+end
+
+function FT:RefreshList(mode)
     if not self.db then
         return
     end
-    self.db.items = self.db.items or {}
-    self:RefreshProgress()
+    mode = mode or self:GetActiveMode()
+    if mode == self.MODES.ALL then
+        self.db.allItems = self.db.allItems or {}
+    else
+        self.db.items = self.db.items or {}
+    end
+    self:RefreshProgress(mode)
 end
 
 function FT:InitUI()
@@ -666,6 +883,7 @@ function FT:InitUI()
 
     self.frame = frame
     self.rows = {}
+    self.allRows = {}
 
     local point = self.db.frame.point or "CENTER"
     local x = self.db.frame.x or 0
@@ -710,6 +928,7 @@ function FT:InitUI()
     local farmingContent = CreateFrame("Frame", nil, frame)
     farmingContent:SetAllPoints(frame)
     frame.farmingContent = farmingContent
+    frame.targetsContent = farmingContent
 
     local targetCheck = CreateFrame("CheckButton", nil, farmingContent, "UICheckButtonTemplate")
     targetCheck:SetPoint("TOPLEFT", farmingContent, "TOPLEFT", 18, -72)
@@ -722,7 +941,7 @@ function FT:InitUI()
             return
         end
         FT.db.considerTargets = self:GetChecked()
-        FT:RefreshProgress()
+        FT:RefreshProgress(FT.MODES.TARGETS)
         FT:UpdateControls()
     end)
 
@@ -829,11 +1048,11 @@ function FT:InitUI()
     frame.addButton:SetPoint("BOTTOMLEFT", 18, 18)
     frame.addButton:SetText("Add Item")
     frame.addButton:SetScript("OnClick", function()
-        if FT.running then
+        if FT:IsAnyRunning() then
             return
         end
         table.insert(FT.db.items, { itemID = nil, target = 0 })
-        FT:RefreshList()
+        FT:RefreshList(FT.MODES.TARGETS)
     end)
 
     frame.startButton = CreateFrame("Button", nil, farmingContent, "UIPanelButtonTemplate")
@@ -841,7 +1060,7 @@ function FT:InitUI()
     frame.startButton:SetPoint("LEFT", frame.addButton, "RIGHT", 12, 0)
     frame.startButton:SetText("Start")
     frame.startButton:SetScript("OnClick", function()
-        FT:StartRun()
+        FT:StartRun(FT.MODES.TARGETS)
     end)
 
     frame.pauseButton = CreateFrame("Button", nil, farmingContent, "UIPanelButtonTemplate")
@@ -849,7 +1068,7 @@ function FT:InitUI()
     frame.pauseButton:SetPoint("LEFT", frame.startButton, "RIGHT", 12, 0)
     frame.pauseButton:SetText("Pause")
     frame.pauseButton:SetScript("OnClick", function()
-        FT:PauseRun()
+        FT:PauseRun(FT.MODES.TARGETS)
     end)
 
     frame.stopButton = CreateFrame("Button", nil, farmingContent, "UIPanelButtonTemplate")
@@ -857,7 +1076,7 @@ function FT:InitUI()
     frame.stopButton:SetPoint("LEFT", frame.pauseButton, "RIGHT", 12, 0)
     frame.stopButton:SetText("Stop")
     frame.stopButton:SetScript("OnClick", function()
-        FT:StopRun()
+        FT:StopRun(FT.MODES.TARGETS)
     end)
 
     frame.resetButton = CreateFrame("Button", nil, farmingContent, "UIPanelButtonTemplate")
@@ -865,13 +1084,131 @@ function FT:InitUI()
     frame.resetButton:SetPoint("LEFT", frame.stopButton, "RIGHT", 12, 0)
     frame.resetButton:SetText("Reset")
     frame.resetButton:SetScript("OnClick", function()
-        FT:ResetRun()
+        FT:ResetRun(FT.MODES.TARGETS)
     end)
 
-    self:RefreshList()
+    farmingContent.addButton = frame.addButton
+    farmingContent.startButton = frame.startButton
+    farmingContent.pauseButton = frame.pauseButton
+    farmingContent.stopButton = frame.stopButton
+    farmingContent.resetButton = frame.resetButton
+    farmingContent.presetDropdown = presetDropdown
+    farmingContent.presetNameBox = presetNameBox
+    farmingContent.presetSaveButton = saveButton
+    farmingContent.presetLoadButton = loadButton
+    farmingContent.presetDeleteButton = deleteButton
+    farmingContent.targetCheck = targetCheck
+    farmingContent.targetCheckLabel = targetLabel
+    farmingContent.profilesButton = profilesButton
+
+    local allItemsContent = CreateFrame("Frame", nil, frame)
+    allItemsContent:SetAllPoints(frame)
+    allItemsContent:Hide()
+    frame.allItemsContent = allItemsContent
+
+    local allHeader = CreateFrame("Frame", nil, allItemsContent)
+    allHeader:SetPoint("TOPLEFT", 18, -88)
+    allHeader:SetPoint("TOPRIGHT", -34, -88)
+    allHeader:SetHeight(16)
+
+    local allHeaderItem = allHeader:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    allHeaderItem:SetPoint("LEFT", 2, 0)
+    allHeaderItem:SetText("Item")
+
+    local allHeaderName = allHeader:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    allHeaderName:SetPoint("LEFT", allHeader, "LEFT", 2 + ITEM_BUTTON_SIZE + 8, 0)
+    allHeaderName:SetText("Name")
+
+    local allHeaderCount = allHeader:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    allHeaderCount:SetPoint("LEFT", allHeader, "LEFT", 2 + ITEM_BUTTON_SIZE + 8 + ALL_NAME_WIDTH + 12, 0)
+    allHeaderCount:SetText("Count")
+
+    local allScrollFrame = CreateFrame("ScrollFrame", nil, allItemsContent, "UIPanelScrollFrameTemplate")
+    allScrollFrame:SetPoint("TOPLEFT", 18, -106)
+    allScrollFrame:SetPoint("BOTTOMRIGHT", -34, 54)
+
+    local allContent = CreateFrame("Frame", nil, allScrollFrame)
+    allContent:SetSize(1, 1)
+    allScrollFrame:SetScrollChild(allContent)
+    allScrollFrame:SetScript("OnSizeChanged", function(_, width)
+        allContent:SetWidth(width)
+    end)
+    allContent:SetWidth(allScrollFrame:GetWidth())
+
+    self.allListScrollFrame = allScrollFrame
+    self.allListContent = allContent
+
+    local allStartButton = CreateFrame("Button", nil, allItemsContent, "UIPanelButtonTemplate")
+    allStartButton:SetSize(70, 22)
+    allStartButton:SetPoint("BOTTOMLEFT", 18, 18)
+    allStartButton:SetText("Start")
+    allStartButton:SetScript("OnClick", function()
+        FT:StartRun(FT.MODES.ALL)
+    end)
+
+    local allPauseButton = CreateFrame("Button", nil, allItemsContent, "UIPanelButtonTemplate")
+    allPauseButton:SetSize(70, 22)
+    allPauseButton:SetPoint("LEFT", allStartButton, "RIGHT", 12, 0)
+    allPauseButton:SetText("Pause")
+    allPauseButton:SetScript("OnClick", function()
+        FT:PauseRun(FT.MODES.ALL)
+    end)
+
+    local allStopButton = CreateFrame("Button", nil, allItemsContent, "UIPanelButtonTemplate")
+    allStopButton:SetSize(70, 22)
+    allStopButton:SetPoint("LEFT", allPauseButton, "RIGHT", 12, 0)
+    allStopButton:SetText("Stop")
+    allStopButton:SetScript("OnClick", function()
+        FT:StopRun(FT.MODES.ALL)
+    end)
+
+    local allResetButton = CreateFrame("Button", nil, allItemsContent, "UIPanelButtonTemplate")
+    allResetButton:SetSize(70, 22)
+    allResetButton:SetPoint("LEFT", allStopButton, "RIGHT", 12, 0)
+    allResetButton:SetText("Reset")
+    allResetButton:SetScript("OnClick", function()
+        FT:ResetRun(FT.MODES.ALL)
+    end)
+
+    allItemsContent.startButton = allStartButton
+    allItemsContent.pauseButton = allPauseButton
+    allItemsContent.stopButton = allStopButton
+    allItemsContent.resetButton = allResetButton
+
+    frame.tabs = {}
+
+    local tabTargets = CreateFrame("Button", "FarmingTimerFrameTab1", frame, "PanelTabButtonTemplate")
+    tabTargets:SetID(1)
+    tabTargets:SetText("Targets")
+    tabTargets.mode = FT.MODES.TARGETS
+    tabTargets:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 12, -2)
+    tabTargets:SetScript("OnClick", function(self)
+        FT:ActivateMode(self.mode)
+    end)
+    tabTargets:SetFrameLevel(frame:GetFrameLevel() + 2)
+    PanelTemplates_TabResize(tabTargets, 0)
+    tabTargets:Show()
+    frame.tabs[1] = tabTargets
+
+    local tabAll = CreateFrame("Button", "FarmingTimerFrameTab2", frame, "PanelTabButtonTemplate")
+    tabAll:SetID(2)
+    tabAll:SetText("All Items")
+    tabAll.mode = FT.MODES.ALL
+    tabAll:SetPoint("LEFT", tabTargets, "RIGHT", -16, 0)
+    tabAll:SetScript("OnClick", function(self)
+        FT:ActivateMode(self.mode)
+    end)
+    tabAll:SetFrameLevel(frame:GetFrameLevel() + 2)
+    PanelTemplates_TabResize(tabAll, 0)
+    tabAll:Show()
+    frame.tabs[2] = tabAll
+
+    PanelTemplates_SetNumTabs(frame, 2)
+
+    self:RefreshList(FT.MODES.TARGETS)
     self:UpdateControls()
-    self:UpdateTimer()
     self:RefreshPresetDropdown()
+    self:ActivateMode(self:GetActiveMode())
 
     if self.db.visible then
         frame:Show()
