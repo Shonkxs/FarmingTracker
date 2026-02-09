@@ -981,11 +981,14 @@ function FT:SetCachedPrice(itemID, unitPrice, auctionable)
     }
 end
 
-function FT:SetCachedPriceMin(itemID, unitPrice)
+function FT:SetCachedPriceMin(itemID, unitPrice, scanStamp)
     if not itemID or not unitPrice then
         return
     end
-    local existing = self:GetCachedPrice(itemID)
+    local existing, _, lastUpdated = self:GetCachedPrice(itemID)
+    if scanStamp and lastUpdated and lastUpdated < scanStamp then
+        existing = nil
+    end
     if existing and existing > 0 and existing <= unitPrice then
         return
     end
@@ -1171,12 +1174,18 @@ function FT:HandlePriceResult(itemID, unitPrice)
     end
 end
 
-function FT:StartReagentScan()
+function FT:StartReagentScan(force)
     if not self.ahAvailable or not C_AuctionHouse or not C_AuctionHouse.SendBrowseQuery then
         return
     end
     if self.ahScan and self.ahScan.inProgress then
         return
+    end
+    if self.ahScanReady and not force then
+        return
+    end
+    if force then
+        self.ahScanReady = false
     end
     local filters = self:GetReagentFilterSets()
     if #filters == 0 then
@@ -1190,6 +1199,7 @@ function FT:StartReagentScan()
         lastResultAt = GetTime(),
         querySentAt = 0,
         maxCategorySeconds = 8,
+        startStamp = self:GetServerTimestamp(),
     }
     self.ahScanReady = false
     if self.ShowScanProgress then
@@ -1255,7 +1265,8 @@ function FT:ProcessBrowseResults(results)
         local minPrice = info.minPrice
         local quantity = info.totalQuantity or 0
         if itemID and minPrice and minPrice > 0 and quantity > 0 then
-            self:SetCachedPriceMin(itemID, minPrice)
+            local stamp = self.ahScan and self.ahScan.startStamp or nil
+            self:SetCachedPriceMin(itemID, minPrice, stamp)
         end
     end
 end
@@ -1921,9 +1932,7 @@ end
 
 function FT:AUCTION_HOUSE_SHOW()
     self.ahAvailable = true
-    if not self.ahScanReady then
-        self:StartReagentScan()
-    end
+    self:StartReagentScan(true)
 end
 
 function FT:AUCTION_HOUSE_CLOSED()
