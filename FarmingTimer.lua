@@ -1440,6 +1440,34 @@ function FT:FormatMoney(copper)
     return sign .. table.concat(parts, " ")
 end
 
+function FT:FormatMoneyIcons(copper)
+    if not copper then
+        return nil
+    end
+    local sign = ""
+    if copper < 0 then
+        sign = "-"
+        copper = math.abs(copper)
+    end
+    local gold = math.floor(copper / 10000)
+    local silver = math.floor((copper % 10000) / 100)
+    local cop = copper % 100
+    local parts = {}
+    local goldIcon = "Interface\\MoneyFrame\\UI-GoldIcon"
+    local silverIcon = "Interface\\MoneyFrame\\UI-SilverIcon"
+    local copperIcon = "Interface\\MoneyFrame\\UI-CopperIcon"
+    if gold > 0 then
+        table.insert(parts, string.format("%d|T%s:12:12:0:0|t", gold, goldIcon))
+    end
+    if silver > 0 or (gold > 0 and cop > 0) then
+        table.insert(parts, string.format("%d|T%s:12:12:0:0|t", silver, silverIcon))
+    end
+    if cop > 0 or #parts == 0 then
+        table.insert(parts, string.format("%d|T%s:12:12:0:0|t", cop, copperIcon))
+    end
+    return sign .. table.concat(parts, " ")
+end
+
 function FT:GetAllItemsTotalValue()
     if not self.db or not self.db.allItems then
         return nil, 0, 0

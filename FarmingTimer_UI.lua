@@ -690,25 +690,35 @@ function FT:UpdateSummary(mode, completed, valid)
     mode = mode or self:GetActiveMode()
     if mode == self.MODES.ALL then
         local items = (self.db and self.db.allItems) or {}
+        local status
         if #items == 0 then
-            self.frame.statusText:SetText("No items collected")
+            status = "No items collected"
         else
-            local total, pricedCount, totalCount = FT:GetAllItemsTotalValue()
-            local status = string.format("Tracking %d items", #items)
-            if total then
-                status = string.format("%s | AH Total: %s", status, FT:FormatMoney(total))
-            else
-                status = string.format("%s | AH Total: —", status)
-            end
-            if totalCount > 0 and pricedCount < totalCount then
-                status = status .. " (partial)"
-            end
-            if not FT.ahScanReady then
-                status = status .. " | Open Auction House to scan reagents"
-            end
-            self.frame.statusText:SetText(status)
+            status = string.format("Tracking %d items", #items)
+        end
+        if not FT.ahScanReady then
+            status = status .. " | Open Auction House to scan reagents"
+        end
+        self.frame.statusText:SetText(status)
+
+        local totalText = nil
+        local total, pricedCount, totalCount = FT:GetAllItemsTotalValue()
+        if total then
+            totalText = string.format("AH Total: %s", FT:FormatMoneyIcons(total))
+        else
+            totalText = "AH Total: —"
+        end
+        if totalCount > 0 and pricedCount < totalCount then
+            totalText = totalText .. " (partial)"
+        end
+        if self.frame and self.frame.allItemsContent and self.frame.allItemsContent.totalValueText then
+            self.frame.allItemsContent.totalValueText:SetText(totalText)
         end
         return
+    end
+
+    if self.frame and self.frame.allItemsContent and self.frame.allItemsContent.totalValueText then
+        self.frame.allItemsContent.totalValueText:SetText("")
     end
 
     completed = tonumber(completed) or 0
@@ -1232,9 +1242,22 @@ function FT:InitUI()
     self.allListScrollFrame = allScrollFrame
     self.allListContent = allContent
 
+    local totalBar = CreateFrame("Frame", nil, allItemsContent, "BackdropTemplate")
+    totalBar:SetPoint("BOTTOMLEFT", allItemsContent, "BOTTOMLEFT", 18, 6)
+    totalBar:SetPoint("BOTTOMRIGHT", allItemsContent, "BOTTOMRIGHT", -18, 6)
+    totalBar:SetHeight(18)
+    totalBar:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 12,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    totalBar:SetBackdropColor(0, 0, 0, 0.6)
+    totalBar:SetBackdropBorderColor(0.4, 0.32, 0.2, 0.8)
+
     local allStartButton = CreateFrame("Button", nil, allItemsContent, "UIPanelButtonTemplate")
     allStartButton:SetSize(70, 22)
-    allStartButton:SetPoint("BOTTOMLEFT", 18, 18)
+    allStartButton:SetPoint("BOTTOMLEFT", 18, 30)
     allStartButton:SetText("Start")
     allStartButton:SetScript("OnClick", function()
         FT:StartRun(FT.MODES.ALL)
@@ -1264,10 +1287,17 @@ function FT:InitUI()
         FT:ResetRun(FT.MODES.ALL)
     end)
 
+    local allTotalText = totalBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    allTotalText:SetPoint("LEFT", totalBar, "LEFT", 8, 0)
+    allTotalText:SetPoint("RIGHT", totalBar, "RIGHT", -8, 0)
+    allTotalText:SetJustifyH("RIGHT")
+    allTotalText:SetText("")
+
     allItemsContent.startButton = allStartButton
     allItemsContent.pauseButton = allPauseButton
     allItemsContent.stopButton = allStopButton
     allItemsContent.resetButton = allResetButton
+    allItemsContent.totalValueText = allTotalText
 
     frame.tabs = {}
 
