@@ -690,19 +690,23 @@ function FT:UpdateSummary(mode, completed, valid)
     mode = mode or self:GetActiveMode()
     if mode == self.MODES.ALL then
         local items = (self.db and self.db.allItems) or {}
-        if not FT.ahScanReady then
-            self.frame.statusText:SetText("Open Auction House to scan reagents")
-            return
-        end
         if #items == 0 then
             self.frame.statusText:SetText("No items collected")
         else
-            local total = FT:GetAllItemsTotalValue()
+            local total, pricedCount, totalCount = FT:GetAllItemsTotalValue()
+            local status = string.format("Tracking %d items", #items)
             if total then
-                self.frame.statusText:SetText(string.format("Tracking %d items | AH Total: %s", #items, FT:FormatMoney(total)))
+                status = string.format("%s | AH Total: %s", status, FT:FormatMoney(total))
             else
-                self.frame.statusText:SetText(string.format("Tracking %d items", #items))
+                status = string.format("%s | AH Total: —", status)
             end
+            if totalCount > 0 and pricedCount < totalCount then
+                status = status .. " (partial)"
+            end
+            if not FT.ahScanReady then
+                status = status .. " | Open Auction House to scan reagents"
+            end
+            self.frame.statusText:SetText(status)
         end
         return
     end

@@ -1442,21 +1442,23 @@ end
 
 function FT:GetAllItemsTotalValue()
     if not self.db or not self.db.allItems then
-        return nil
+        return nil, 0, 0
     end
     local total = 0
-    local hasValue = false
+    local pricedCount = 0
+    local totalCount = 0
     for _, item in ipairs(self.db.allItems) do
+        totalCount = totalCount + 1
         local unitPrice = self:GetCachedPrice(item.itemID)
         if unitPrice then
             total = total + (unitPrice * (tonumber(item.current) or 0))
-            hasValue = true
+            pricedCount = pricedCount + 1
         end
     end
-    if not hasValue then
-        return nil
+    if pricedCount == 0 then
+        return nil, 0, totalCount
     end
-    return total
+    return total, pricedCount, totalCount
 end
 
 function FT:IsValidItem(item)
