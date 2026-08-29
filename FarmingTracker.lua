@@ -1,5 +1,6 @@
 local ADDON_NAME, FT = ...
 FT = FT or {}
+_G.FarmingTracker = FT
 _G.FarmingTimer = FT
 
 FT.addonName = ADDON_NAME
@@ -35,15 +36,17 @@ local function copyDefaults(dst, src)
 end
 
 function FT:Print(msg)
-    DEFAULT_CHAT_FRAME:AddMessage("|cff4ade80FarmingTimer:|r " .. tostring(msg))
+    DEFAULT_CHAT_FRAME:AddMessage("|cff4ade80FarmingTracker:|r " .. tostring(msg))
 end
 
 function FT:InitDB()
-    FarmingTimerDB = FarmingTimerDB or {}
-    FarmingTimerAccountDB = FarmingTimerAccountDB or {}
-    copyDefaults(FarmingTimerDB, DEFAULTS)
-    self.db = FarmingTimerDB
-    self.accountDb = FarmingTimerAccountDB
+    FarmingTrackerDB = FarmingTrackerDB or FarmingTimerDB or {}
+    FarmingTrackerAccountDB = FarmingTrackerAccountDB or FarmingTimerAccountDB or {}
+    FarmingTimerDB = FarmingTrackerDB
+    FarmingTimerAccountDB = FarmingTrackerAccountDB
+    copyDefaults(FarmingTrackerDB, DEFAULTS)
+    self.db = FarmingTrackerDB
+    self.accountDb = FarmingTrackerAccountDB
     self.accountDb.presets = self.accountDb.presets or {}
     self.accountDb.ahPrices = self.accountDb.ahPrices or {}
     self:GetActiveMode()
@@ -455,7 +458,7 @@ function FT:EnsurePopupDialogs()
     end
     self.popupsReady = true
 
-    StaticPopupDialogs["FARMINGTIMER_EXPORT"] = {
+    StaticPopupDialogs["FARMINGTRACKER_EXPORT"] = {
         text = "Export preset data",
         button1 = "Close",
         hasEditBox = true,
@@ -477,7 +480,7 @@ function FT:EnsurePopupDialogs()
         end,
     }
 
-    StaticPopupDialogs["FARMINGTIMER_IMPORT"] = {
+    StaticPopupDialogs["FARMINGTRACKER_IMPORT"] = {
         text = "Import preset data",
         button1 = "Import",
         button2 = "Cancel",
@@ -511,7 +514,7 @@ function FT:ShowExportDialog(presetName)
         return
     end
     self:EnsurePopupDialogs()
-    local dialog = StaticPopup_Show("FARMINGTIMER_EXPORT")
+    local dialog = StaticPopup_Show("FARMINGTRACKER_EXPORT")
     if dialog and dialog.editBox then
         dialog.data = exportString
         dialog.editBox:SetText(exportString)
@@ -526,7 +529,7 @@ function FT:ShowImportDialog()
         return
     end
     self:EnsurePopupDialogs()
-    StaticPopup_Show("FARMINGTIMER_IMPORT")
+    StaticPopup_Show("FARMINGTRACKER_IMPORT")
 end
 
 function FT:GetPresetNamesSorted()
@@ -1850,9 +1853,9 @@ function FT:RegisterSlash()
         return
     end
     self.slashRegistered = true
-    SLASH_FARMINGTIMER1 = "/ft"
-    SLASH_FARMINGTIMER2 = "/farmingtimer"
-    SlashCmdList["FARMINGTIMER"] = function()
+    SLASH_FARMINGTRACKER1 = "/ft"
+    SLASH_FARMINGTRACKER2 = "/farmingtracker"
+    SlashCmdList["FARMINGTRACKER"] = function()
         self:ToggleFrame()
     end
 end
@@ -1891,9 +1894,9 @@ function FT:InitLDB()
         return
     end
 
-    self.ldb = LDB:NewDataObject("FarmingTimer", {
+    self.ldb = LDB:NewDataObject("FarmingTracker", {
         type = "launcher",
-        text = "FarmingTimer",
+        text = "FarmingTracker",
         icon = "Interface\\Icons\\INV_Misc_PocketWatch_01",
     })
 
@@ -1904,13 +1907,13 @@ function FT:InitLDB()
     end
 
     self.ldb.OnTooltipShow = function(tooltip)
-        tooltip:AddLine("FarmingTimer")
+        tooltip:AddLine("FarmingTracker")
         tooltip:AddLine("Left-click to toggle")
         tooltip:AddLine("/ft")
     end
 
     self.db.minimap = self.db.minimap or { hide = false, minimapPos = 220 }
-    DBIcon:Register("FarmingTimer", self.ldb, self.db.minimap)
+    DBIcon:Register("FarmingTracker", self.ldb, self.db.minimap)
     self.dbicon = DBIcon
 end
 
@@ -1919,9 +1922,9 @@ function FT:UpdateMinimapVisibility()
         return
     end
     if self.db.minimap.hide then
-        self.dbicon:Hide("FarmingTimer")
+        self.dbicon:Hide("FarmingTracker")
     else
-        self.dbicon:Show("FarmingTimer")
+        self.dbicon:Show("FarmingTracker")
     end
 end
 

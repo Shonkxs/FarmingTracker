@@ -93,7 +93,7 @@ function FT:CreateProfilesWindow()
         return
     end
 
-    local frame = CreateFrame("Frame", "FarmingTimerProfilesFrame", UIParent, "BackdropTemplate")
+    local frame = CreateFrame("Frame", "FarmingTrackerProfilesFrame", UIParent, "BackdropTemplate")
     frame:SetSize(460, 280)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("DIALOG")
@@ -910,7 +910,7 @@ function FT:InitUI()
         return
     end
 
-    local frame = CreateFrame("Frame", "FarmingTimerFrame", UIParent, "BackdropTemplate")
+    local frame = CreateFrame("Frame", "FarmingTrackerFrame", UIParent, "BackdropTemplate")
     local height = self.db.frame.height or FRAME_HEIGHT
     height = math.max(FRAME_MIN_HEIGHT, math.min(height, FRAME_MAX_HEIGHT))
     frame:SetSize(FRAME_WIDTH, height)
@@ -967,7 +967,7 @@ function FT:InitUI()
 
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -10)
-    title:SetText("FarmingTimer")
+    title:SetText("FarmingTracker")
 
     local closeButton = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     closeButton:SetPoint("TOPRIGHT", -6, -6)
@@ -1050,7 +1050,7 @@ function FT:InitUI()
     presetLabel:SetPoint("LEFT", 2, 0)
     presetLabel:SetText("Preset")
 
-    local presetDropdown = CreateFrame("Frame", "FarmingTimerPresetDropDown", presetRow, "UIDropDownMenuTemplate")
+    local presetDropdown = CreateFrame("Frame", "FarmingTrackerPresetDropDown", presetRow, "UIDropDownMenuTemplate")
     presetDropdown:SetPoint("LEFT", presetLabel, "RIGHT", -6, -2)
     UIDropDownMenu_SetWidth(presetDropdown, 90)
     UIDropDownMenu_SetText(presetDropdown, "Select")
@@ -1301,7 +1301,7 @@ function FT:InitUI()
 
     frame.tabs = {}
 
-    local tabTargets = CreateFrame("Button", "FarmingTimerFrameTab1", frame, "PanelTabButtonTemplate")
+    local tabTargets = CreateFrame("Button", "FarmingTrackerFrameTab1", frame, "PanelTabButtonTemplate")
     tabTargets:SetID(1)
     tabTargets:SetText("Targets")
     tabTargets.mode = FT.MODES.TARGETS
@@ -1314,7 +1314,7 @@ function FT:InitUI()
     tabTargets:Show()
     frame.tabs[1] = tabTargets
 
-    local tabAll = CreateFrame("Button", "FarmingTimerFrameTab2", frame, "PanelTabButtonTemplate")
+    local tabAll = CreateFrame("Button", "FarmingTrackerFrameTab2", frame, "PanelTabButtonTemplate")
     tabAll:SetID(2)
     tabAll:SetText("All Items")
     tabAll.mode = FT.MODES.ALL

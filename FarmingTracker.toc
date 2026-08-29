@@ -1,17 +1,17 @@
 ## Interface: 120000
-## Title: FarmingTimer
+## Title: FarmingTracker
 ## Notes: Practical, adjustable time display for farming
 ## Author: Shonkxs
 ## Version: 2.0.0
-## SavedVariables: FarmingTimerAccountDB
-## SavedVariablesPerCharacter: FarmingTimerDB
+## SavedVariables: FarmingTrackerAccountDB, FarmingTimerAccountDB
+## SavedVariablesPerCharacter: FarmingTrackerDB, FarmingTimerDB
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
 Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
 Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
 
-FarmingTimer.lua
-FarmingTimer_UI.lua
-FarmingTimer_Options.lua
+FarmingTracker.lua
+FarmingTracker_UI.lua
+FarmingTracker_Options.lua
 

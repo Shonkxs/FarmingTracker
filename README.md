@@ -1,4 +1,4 @@
-# FarmingTimer
+# FarmingTracker
 
 A simple WoW addon that tracks your farming time and stops automatically when all target amounts are reached.
 
@@ -18,7 +18,7 @@ A simple WoW addon that tracks your farming time and stops automatically when al
 - Import with merge mode (do not overwrite existing presets).
 
 ## Installation
-1. Copy the `FarmingTimer` folder to `World of Warcraft/_retail_/Interface/AddOns/`.
+1. Copy the `FarmingTracker` folder to `World of Warcraft/_retail_/Interface/AddOns/`.
 2. Enable the addon at the character selection screen.
 
 ## Quick Start
@@ -62,14 +62,14 @@ A simple WoW addon that tracks your farming time and stops automatically when al
 - In **All Items** mode, the collected list remains visible after **Stop** and clears on **Reset**.
 - AH prices only update after a reagent scan (with the Auction House open).
 
-## Options (Interface -> AddOns -> FarmingTimer)
-- **Open FarmingTimer**: opens the main window.
+## Options (Interface -> AddOns -> FarmingTracker)
+- **Open FarmingTracker**: opens the main window.
 - **Show minimap button**: toggle minimap button.
 - **Reset frame position**: resets the window position.
 
 ## Slash Commands
 - `/ft`
-- `/farmingtimer`
+- `/farmingtracker`
 
 ## FAQ
 **Why does my item show a question mark?**

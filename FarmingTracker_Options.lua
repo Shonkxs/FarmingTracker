@@ -6,11 +6,11 @@ function FT:InitOptions()
     end
 
     local panel = CreateFrame("Frame")
-    panel.name = "FarmingTimer"
+    panel.name = "FarmingTracker"
 
     local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("FarmingTimer")
+    title:SetText("FarmingTracker")
 
     local subtitle = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -8)
@@ -19,7 +19,7 @@ function FT:InitOptions()
     local openButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     openButton:SetSize(160, 22)
     openButton:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -16)
-    openButton:SetText("Open FarmingTimer")
+    openButton:SetText("Open FarmingTracker")
     openButton:SetScript("OnClick", function()
         FT:ShowFrame()
     end)
